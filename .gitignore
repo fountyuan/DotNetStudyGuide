@@ -1,0 +1,7 @@
+﻿################################################################################
+# 此 .gitignore 文件已由 Microsoft(R) Visual Studio 自动创建。
+################################################################################
+
+/Practices/Fountain.DeepSeekDemo/.vs
+/Practices/Fountain.DeepSeekDemo/Fountain.DeepSeekDemo/bin/Debug/net6.0
+/Practices/Fountain.DeepSeekDemo/Fountain.DeepSeekDemo/obj
