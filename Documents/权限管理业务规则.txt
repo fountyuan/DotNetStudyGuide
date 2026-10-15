@@ -1,0 +1,163 @@
+基于完整数据库设计，我整理出**所有业务规则**，按分类列出：
+
+## 一、租户管理规则
+
+| 规则 | 说明 | 涉及字段 |
+|------|------|----------|
+| 租户编码全局唯一 | 不同租户不能使用相同编码 | `tenant.tenant_code` |
+| 租户状态控制登录 | 禁用后租户下所有用户无法登录 | `tenant.is_active` |
+| 租户过期自动禁用 | `expire_time` 过期后租户不可用 | `tenant.expire_time` |
+| 试用期自动管理 | `trial_end_time` 过期后转为正式/禁用 | `tenant.trial_end_time` |
+| 用户数配额限制 | 租户下用户数不能超过 `max_user_count` | `tenant.max_user_count` |
+| 存储空间配额限制 | 租户文件存储不能超过 `max_storage_gb` | `tenant.max_storage_gb` |
+| API调用配额限制 | 租户每日API调用不能超过 `max_api_calls` | `tenant.max_api_calls` |
+| 并发数配额限制 | 租户同时在线用户不能超过 `max_concurrent` | `tenant.max_concurrent` |
+
+## 二、组织架构规则
+
+| 规则 | 说明 | 涉及字段 |
+|------|------|----------|
+| 同父节点下名称唯一 | 同一父组织下组织名称不能重复 | `org.uk_tenant_parent_name` |
+| 组织编码租户内唯一 | 同一租户下组织编码唯一 | `org.uk_tenant_code` |
+| 组织禁用影响子节点 | 组织禁用后子组织应不可选 | `org.status` |
+| 支持无限层级 | 通过 `parent_id` 支持树形结构 | `org.parent_id` |
+| 负责人必须存在 | `leader_id` 必须对应有效用户 | `org.leader_id` |
+| 组织类型约束 | 集团下可挂公司，公司下可挂部门 | `org.org_type` |
+
+## 三、用户管理规则
+
+| 规则 | 说明 | 涉及字段 |
+|------|------|----------|
+| 用户名租户内唯一 | 同一租户下用户名不能重复 | `user.uk_tenant_user_name` |
+| 手机号租户内唯一 | 同一租户下手机号不能重复 | `user.uk_tenant_phone` |
+| 邮箱租户内唯一 | 同一租户下邮箱不能重复 | `user.uk_tenant_email` |
+| 密码加密存储 | 密码使用 BCrypt 加密 | `user.password` |
+| 登录失败锁定 | 连续失败 `fail_count` 达到阈值后锁定 | `user.fail_count`, `user.lock_time` |
+| 锁定自动解锁 | `lock_time` 过期后自动解锁 | `user.lock_time` |
+| 用户类型权限 | `user_type` 决定默认权限级别 | `user.user_type` |
+| 用户状态控制登录 | 禁用/锁定的用户不能登录 | `user.user_status` |
+| 所属组织必须存在 | `org_id` 必须对应有效组织 | `user.org_id` |
+
+## 四、角色管理规则
+
+| 规则 | 说明 | 涉及字段 |
+|------|------|----------|
+| 角色编码租户内唯一 | 同一租户下角色编码唯一 | `role.uk_tenant_code` |
+| 角色名称租户内唯一 | 同一租户下角色名称唯一 | `role.uk_tenant_name` |
+| 角色类型不可变 | 超级管理员和租户管理员不可删除/修改类型 | `role.role_type` |
+| 至少有一个超级管理员 | 系统至少保留一个超级管理员角色 | 应用层校验 |
+
+## 五、数据权限规则
+
+| 规则 | 说明 | 涉及字段 |
+|------|------|----------|
+| 数据范围类型 | 1=本人，2=本小组，3=本部门，4=本公司，5=全部，6=自定义 | `role.data_scope` |
+| 自定义组织列表 | `data_scope=6` 时使用 `data_scope_rule` 配置 | `data_scope_rule.*` |
+| 资源类型支持 | 支持 org/project/region/store 等资源 | `data_scope_rule.resource_type` |
+| 包含子级控制 | 是否包含子组织数据 | `data_scope_rule.include_children` |
+| 允许/拒绝策略 | 支持允许和拒绝两种策略 | `data_scope_rule.effect` |
+| 优先级控制 | 多规则冲突时优先级高的生效 | `data_scope_rule.priority` |
+| 时效控制 | 规则可设置生效时间段 | `data_scope_rule.effective_from/to` |
+| 数据范围不越权 | 用户的数据权限不能超过角色的数据权限 | 应用层校验 |
+
+## 六、菜单权限规则
+
+| 规则 | 说明 | 涉及字段 |
+|------|------|----------|
+| 同父节点下菜单名唯一 | 同一父菜单下菜单名称唯一 | `menu.uk_tenant_name_parent` |
+| 菜单类型限制 | 1=目录，2=菜单 | `menu.menu_type` |
+| 菜单启用状态 | 禁用后菜单不显示 | `menu.is_enabled` |
+| 菜单显示控制 | 隐藏后菜单不可见但可能可访问 | `menu.is_visible` |
+| 顶级菜单父ID为0 | 顶级菜单 `parent_id = 0` | `menu.parent_id` |
+| 菜单路径唯一性 | 同一租户下路由路径应唯一 | 应用层校验 |
+
+## 七、按钮权限规则
+
+| 规则 | 说明 | 涉及字段 |
+|------|------|----------|
+| 权限标识租户内唯一 | 同一租户下权限标识唯一 | `menu_button.uk_tenant_permission` |
+| 同菜单下按钮编码唯一 | 同一菜单下按钮编码唯一 | `menu_button.uk_menu_code` |
+| 按钮启用控制 | 禁用后按钮不显示 | `menu_button.is_enabled` |
+| 按钮必须属于菜单 | `menu_id` 必须对应有效菜单 | `menu_button.menu_id` |
+
+## 八、角色分配规则
+
+| 规则 | 说明 | 涉及字段 |
+|------|------|----------|
+| 用户-角色唯一 | 同一用户不能重复分配同一角色 | `user_role.uk_user_role` |
+| 角色-菜单唯一 | 同一角色不能重复分配同一菜单 | `role_menu.uk_role_menu` |
+| 角色-按钮唯一 | 同一角色不能重复分配同一按钮 | `role_button.uk_role_button` |
+| 父菜单权限自动包含 | 分配菜单时自动包含其子菜单 | 应用层处理 |
+| 按钮权限依赖菜单 | 分配按钮前必须先有菜单权限 | 应用层校验 |
+
+## 九、认证令牌规则
+
+| 规则 | 说明 | 涉及字段 |
+|------|------|----------|
+| 令牌类型区分 | 1=Access，2=Refresh，3=SSO | `auth_token.token_type` |
+| 用户-设备-类型唯一 | 同一用户同一设备同一类型只有一条有效令牌 | `auth_token.uk_user_type_device` |
+| 令牌哈希唯一 | 令牌哈希值全局唯一 | `auth_token.uk_token_hash` |
+| 令牌过期自动失效 | `expires_time` 过期后令牌无效 | `auth_token.expires_time` |
+| 刷新次数限制 | 刷新令牌使用次数不能超过 `max_refresh_count` | `auth_token.refresh_count` |
+| 乐观锁防并发 | `version` 字段防止并发刷新 | `auth_token.version` |
+| SSO会话唯一 | `session_id` 全局唯一 | `auth_token.uk_session_id` |
+| 令牌撤销不可逆 | 撤销后不能再使用 | `auth_token.is_revoked` |
+
+## 十、日志审计规则
+
+| 规则 | 说明 | 涉及表 |
+|------|------|--------|
+| 操作日志记录 | 所有用户操作记录到 `action_log` | `action_log` |
+| 登录日志记录 | 所有登录尝试记录到 `login_log` | `login_log` |
+| 密码变更记录 | 所有密码变更记录到 `password_log` | `password_log` |
+| 令牌变更记录 | 所有令牌变更记录到 `auth_token_log` | `auth_token_log` |
+| 敏感数据脱敏 | 日志中的密码等敏感字段需脱敏 | 应用层处理 |
+| 日志保留期限 | 操作日志保留90天，登录日志保留30天 | 定时任务 |
+| 失败登录告警 | 短时间内大量失败登录触发告警 | 应用层处理 |
+
+## 十一、逻辑删除规则
+
+| 规则 | 说明 | 涉及表 |
+|------|------|--------|
+| 软删除支持 | 所有核心表支持逻辑删除 | 所有 `is_deleted` 字段 |
+| 删除人追溯 | 记录删除人和删除时间 | `deleted_by`, `deleted_by_name`, `deleted_time` |
+| 已删除数据不可见 | 查询时默认过滤 `is_deleted=1` | 应用层处理 |
+| 已删除数据可恢复 | 支持将 `is_deleted` 改回 0 | 应用层处理 |
+
+## 十二、审计字段规则
+
+| 规则 | 说明 | 涉及字段 |
+|------|------|----------|
+| 创建信息自动填充 | 新增时自动记录创建人和创建时间 | `created_by`, `created_by_name`, `created_time` |
+| 更新信息自动填充 | 更新时自动记录更新人和更新时间 | `updated_by`, `updated_by_name`, `updated_time` |
+| 系统初始化标识 | 系统初始化数据 `created_by=0`, `created_by_name='system'` | 统一规范 |
+| 修改人不能为空 | 更新操作必须有修改人 | 应用层校验 |
+
+## 十三、安全规则
+
+| 规则 | 说明 | 涉及层 |
+|------|------|--------|
+| 密码不能与历史相同 | 修改密码不能与最近N次相同 | 应用层 |
+| 密码定期过期 | 90天后强制修改密码 | 应用层 |
+| 登录失败限流 | 同一IP短时间失败次数限制 | 应用层 |
+| 敏感操作二次验证 | 删除、修改密码等需要二次验证 | 应用层 |
+| Token防重放 | RefreshToken被重复使用立即撤销所有令牌 | 应用层 |
+| IP白名单 | 可配置允许登录的IP范围 | 应用层 |
+
+## 十四、关联删除规则
+
+| 规则 | 说明 | 处理方式 |
+|------|------|----------|
+| 删除用户 | 同时删除 `user_role`、`auth_token`、`auth_token_log` | 应用层处理 |
+| 删除角色 | 同时删除 `user_role`、`role_menu`、`role_button` | 应用层处理 |
+| 删除菜单 | 同时删除 `role_menu`、`menu_button` | 应用层处理 |
+| 删除组织 | 同时删除子组织、更新用户的 `org_id` | 应用层处理 |
+
+## 十五、数据完整性规则
+
+| 规则 | 说明 | 处理方式 |
+|------|------|----------|
+| 用户必须属于有效组织 | `org_id` 必须存在 | 应用层校验 |
+| 角色必须属于有效租户 | `tenant_id` 必须存在 | 应用层校验 |
+| 菜单必须属于有效租户 | `tenant_id` 必须存在 | 应用层校验 |
+| 按钮必须属于有效菜单 | `menu_id` 必须存在 | 应用层校验 |

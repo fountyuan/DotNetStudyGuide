@@ -1,0 +1,1755 @@
+# Fountain Framework - DDD 实体设计完整文档（修订版）
+
+## 目录
+
+1. [概述](#概述)
+2. [框架核心层 (Fountain.Framework.Core)](#框架核心层)
+3. [实体特性定义](#实体特性定义)
+4. [聚合根基类](#聚合根基类)
+5. [值对象基类](#值对象基类)
+6. [领域异常体系](#领域异常体系)
+7. [领域实体完整示例](#领域实体完整示例)
+8. [值对象完整示例](#值对象完整示例)
+9. [仓储接口定义](#仓储接口定义)
+10. [基础设施层实现](#基础设施层实现)
+11. [依赖注入配置](#依赖注入配置)
+12. [最佳实践](#最佳实践)
+13. [常见问题](#常见问题)
+
+---
+
+## 概述
+
+### 设计目标
+
+1. **领域层纯净**：不依赖任何基础设施技术
+2. **声明式配置**：使用特性简化数据库映射
+3. **代码复用**：基类提供通用功能
+4. **可测试性**：领域逻辑可独立测试
+5. **可替换性**：ORM 可随时更换
+
+### 项目结构
+
+```
+Fountain.Framework.Core/                    # 框架核心层
+├── Attributes/                             # 特性定义
+│   ├── EntityAttribute.cs
+│   ├── KeyAttribute.cs
+│   ├── IdentityAttribute.cs
+│   ├── IndexAttribute.cs
+│   ├── MaxLengthAttribute.cs
+│   ├── RequiredAttribute.cs
+│   ├── NotMappedAttribute.cs
+│   └── NavigationAttribute.cs
+├── Domain/                                 # 领域基类
+│   ├── AggregateRoot.cs
+│   ├── AuditableAggregateRoot.cs
+│   ├── FullAuditedAggregateRoot.cs
+│   ├── ValueObject.cs
+│   └── IDomainEvent.cs
+├── Exceptions/                             # 异常体系
+│   └── DomainException.cs
+├── Enums/                                  # 枚举定义
+│   └── ErrorLevel.cs
+├── Errors/                                 # 错误定义
+│   └── DomainError.cs
+└── Interfaces/                             # 接口定义
+    ├── IAuditable.cs
+    ├── ISoftDeletable.cs
+    └── IAggregateRoot.cs
+
+Fountain.Service.Identity.Domain/           # 业务领域层
+├── Entities/                               # 实体
+│   ├── User.cs
+│   └── UserRole.cs
+├── ValueObjects/                           # 值对象
+│   ├── Email.cs
+│   ├── PhoneNumber.cs
+│   └── Password.cs
+├── Repositories/                           # 仓储接口
+│   └── IUserRepository.cs
+├── Events/                                 # 领域事件
+│   └── UserEvents.cs
+├── Enums/                                  # 枚举
+│   ├── UserStatus.cs
+│   └── UserType.cs
+├── Exceptions/                             # 领域异常
+│   └── IdentityDomainException.cs
+└── Specifications/                         # 查询规约
+    └── UserQuerySpecification.cs
+
+Fountain.Service.Identity.Infrastructure/   # 基础设施层
+├── Repositories/                           # 仓储实现
+│   └── UserRepository.cs
+└── DependencyInjection.cs                  # DI 配置
+
+Fountain.Service.Identity.API/              # API 层
+├── Controllers/
+└── Program.cs
+```
+
+---
+
+## 框架核心层
+
+### 项目文件配置
+
+```xml
+<!-- Fountain.Framework.Core.csproj -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Linq.Expressions" Version="4.3.0" />
+  </ItemGroup>
+</Project>
+```
+
+---
+
+## 实体特性定义
+
+### 1. EntityAttribute - 实体表映射
+
+```csharp
+// Fountain.Framework.Core/Attributes/EntityAttribute.cs
+namespace Fountain.Framework.Core.Attributes;
+
+/// <summary>
+/// 实体特性 - 标识这是一个数据库实体
+/// </summary>
+[AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
+public class EntityAttribute : Attribute
+{
+    /// <summary>
+    /// 数据库表名（可选，默认使用类名）
+    /// </summary>
+    public string? TableName { get; set; }
+    
+    /// <summary>
+    /// 表描述
+    /// </summary>
+    public string? Description { get; set; }
+    
+    /// <summary>
+    /// 架构名称（如 dbo, admin）
+    /// </summary>
+    public string? Schema { get; set; }
+    
+    public EntityAttribute() { }
+    
+    public EntityAttribute(string tableName)
+    {
+        TableName = tableName;
+    }
+    
+    public EntityAttribute(string tableName, string description)
+    {
+        TableName = tableName;
+        Description = description;
+    }
+}
+```
+
+### 2. KeyAttribute - 主键标识
+
+```csharp
+// Fountain.Framework.Core/Attributes/KeyAttribute.cs
+namespace Fountain.Framework.Core.Attributes;
+
+/// <summary>
+/// 主键特性 - 标识实体的主键属性
+/// </summary>
+[AttributeUsage(AttributeTargets.Property)]
+public class KeyAttribute : Attribute
+{
+    /// <summary>
+    /// 主键顺序（用于复合主键）
+    /// </summary>
+    public int Order { get; set; } = 0;
+}
+```
+
+### 3. IdentityAttribute - 自增主键
+
+```csharp
+// Fountain.Framework.Core/Attributes/IdentityAttribute.cs
+namespace Fountain.Framework.Core.Attributes;
+
+/// <summary>
+/// 自增主键特性 - 标识数据库自动生成的主键
+/// </summary>
+[AttributeUsage(AttributeTargets.Property)]
+public class IdentityAttribute : Attribute
+{
+    /// <summary>
+    /// 自增起始值
+    /// </summary>
+    public int Seed { get; set; } = 1;
+    
+    /// <summary>
+    /// 自增量
+    /// </summary>
+    public int Increment { get; set; } = 1;
+}
+```
+
+### 4. IndexAttribute - 索引配置
+
+```csharp
+// Fountain.Framework.Core/Attributes/IndexAttribute.cs
+namespace Fountain.Framework.Core.Attributes;
+
+/// <summary>
+/// 索引特性 - 为属性创建数据库索引
+/// </summary>
+[AttributeUsage(AttributeTargets.Property, AllowMultiple = true)]
+public class IndexAttribute : Attribute
+{
+    /// <summary>
+    /// 索引名称
+    /// </summary>
+    public string? Name { get; set; }
+    
+    /// <summary>
+    /// 是否为唯一索引
+    /// </summary>
+    public bool IsUnique { get; set; }
+    
+    /// <summary>
+    /// 索引排序顺序
+    /// </summary>
+    public int Order { get; set; }
+    
+    /// <summary>
+    /// 包含列（用于覆盖索引）
+    /// </summary>
+    public string[]? IncludeProperties { get; set; }
+    
+    public IndexAttribute() { }
+    
+    public IndexAttribute(string name)
+    {
+        Name = name;
+    }
+    
+    public IndexAttribute(bool isUnique)
+    {
+        IsUnique = isUnique;
+    }
+    
+    public IndexAttribute(string name, bool isUnique)
+    {
+        Name = name;
+        IsUnique = isUnique;
+    }
+}
+```
+
+### 5. MaxLengthAttribute - 字段长度
+
+```csharp
+// Fountain.Framework.Core/Attributes/MaxLengthAttribute.cs
+namespace Fountain.Framework.Core.Attributes;
+
+/// <summary>
+/// 最大长度特性 - 设置字符串字段的最大长度
+/// </summary>
+[AttributeUsage(AttributeTargets.Property)]
+public class MaxLengthAttribute : Attribute
+{
+    /// <summary>
+    /// 最大长度
+    /// </summary>
+    public int Length { get; }
+    
+    /// <summary>
+    /// 最小长度
+    /// </summary>
+    public int MinLength { get; set; }
+    
+    /// <summary>
+    /// 错误消息
+    /// </summary>
+    public string? ErrorMessage { get; set; }
+    
+    public MaxLengthAttribute(int length)
+    {
+        Length = length;
+    }
+}
+```
+
+### 6. RequiredAttribute - 必填字段
+
+```csharp
+// Fountain.Framework.Core/Attributes/RequiredAttribute.cs
+namespace Fountain.Framework.Core.Attributes;
+
+/// <summary>
+/// 必填特性 - 标识字段不能为 NULL
+/// </summary>
+[AttributeUsage(AttributeTargets.Property)]
+public class RequiredAttribute : Attribute
+{
+    /// <summary>
+    /// 是否允许空字符串（仅对字符串有效）
+    /// </summary>
+    public bool AllowEmptyStrings { get; set; }
+    
+    /// <summary>
+    /// 错误消息
+    /// </summary>
+    public string? ErrorMessage { get; set; }
+}
+```
+
+### 7. NotMappedAttribute - 忽略映射
+
+```csharp
+// Fountain.Framework.Core/Attributes/NotMappedAttribute.cs
+namespace Fountain.Framework.Core.Attributes;
+
+/// <summary>
+/// 忽略映射特性 - 标识属性不映射到数据库
+/// </summary>
+[AttributeUsage(AttributeTargets.Property)]
+public class NotMappedAttribute : Attribute
+{
+    /// <summary>
+    /// 原因说明
+    /// </summary>
+    public string? Reason { get; set; }
+}
+```
+
+### 8. NavigationAttribute - 导航属性
+
+```csharp
+// Fountain.Framework.Core/Attributes/NavigationAttribute.cs
+namespace Fountain.Framework.Core.Attributes;
+
+/// <summary>
+/// 导航属性特性 - 标识实体间的关联关系
+/// </summary>
+[AttributeUsage(AttributeTargets.Property)]
+public class NavigationAttribute : Attribute
+{
+    /// <summary>
+    /// 外键属性名称
+    /// </summary>
+    public string? ForeignKey { get; set; }
+    
+    /// <summary>
+    /// 是否为必须关联
+    /// </summary>
+    public bool IsRequired { get; set; }
+}
+```
+
+---
+
+## 聚合根基类
+
+### 1. 基础聚合根（纯领域事件）
+
+```csharp
+// Fountain.Framework.Core/Domain/AggregateRoot.cs
+using Fountain.Framework.Core.Interfaces;
+
+namespace Fountain.Framework.Core.Domain;
+
+/// <summary>
+/// 聚合根抽象基类（纯领域事件，无审计、无软删除）
+/// </summary>
+public abstract class AggregateRoot : IAggregateRoot
+{
+    private readonly List<IDomainEvent> _domainEvents = new();
+
+    /// <summary>
+    /// 获取聚合根产生的所有领域事件（只读集合）
+    /// </summary>
+    public IReadOnlyCollection<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
+
+    /// <summary>
+    /// 添加领域事件
+    /// </summary>
+    protected void AddDomainEvent(IDomainEvent domainEvent)
+    {
+        _domainEvents.Add(domainEvent);
+    }
+
+    /// <summary>
+    /// 添加领域事件（泛型版本）
+    /// </summary>
+    protected void AddDomainEvent<TEvent>(TEvent domainEvent) where TEvent : IDomainEvent
+    {
+        _domainEvents.Add(domainEvent);
+    }
+
+    /// <summary>
+    /// 清除所有领域事件
+    /// </summary>
+    public void ClearDomainEvents()
+    {
+        _domainEvents.Clear();
+    }
+}
+```
+
+### 2. 可审计聚合根
+
+```csharp
+// Fountain.Framework.Core/Domain/AuditableAggregateRoot.cs
+using Fountain.Framework.Core.Interfaces;
+
+namespace Fountain.Framework.Core.Domain;
+
+/// <summary>
+/// 可审计的聚合根抽象基类
+/// </summary>
+public abstract class AuditableAggregateRoot : AggregateRoot, IAuditable
+{
+    /// <summary>
+    /// 主键ID
+    /// </summary>
+    public long Id { get; protected set; }
+
+    #region IAuditable 实现
+
+    /// <summary>
+    /// 创建时间（UTC时间）
+    /// </summary>
+    public DateTime CreatedTime { get; set; }
+
+    /// <summary>
+    /// 创建人ID
+    /// </summary>
+    public long CreatedBy { get; set; }
+
+    /// <summary>
+    /// 创建人名称
+    /// </summary>
+    public string? CreatedByName { get; set; }
+
+    /// <summary>
+    /// 更新时间（UTC时间）
+    /// </summary>
+    public DateTime? UpdatedTime { get; set; }
+
+    /// <summary>
+    /// 更新人ID
+    /// </summary>
+    public long? UpdatedBy { get; set; }
+
+    /// <summary>
+    /// 更新人名称
+    /// </summary>
+    public string? UpdatedByName { get; set; }
+
+    #endregion
+
+    #region 审计辅助方法
+
+    /// <summary>
+    /// 设置创建信息
+    /// </summary>
+    protected void SetCreateInfo(long userId, string userName)
+    {
+        CreatedTime = DateTime.UtcNow;
+        CreatedBy = userId;
+        CreatedByName = userName;
+    }
+
+    /// <summary>
+    /// 设置更新信息
+    /// </summary>
+    protected void SetUpdateInfo(long userId, string userName)
+    {
+        UpdatedTime = DateTime.UtcNow;
+        UpdatedBy = userId;
+        UpdatedByName = userName;
+    }
+
+    #endregion
+}
+```
+
+### 3. 完整审计聚合根（含软删除）
+
+```csharp
+// Fountain.Framework.Core/Domain/FullAuditedAggregateRoot.cs
+using Fountain.Framework.Core.Interfaces;
+
+namespace Fountain.Framework.Core.Domain;
+
+/// <summary>
+/// 可审计和软删除的聚合根抽象基类（包含审计字段和软删除）
+/// </summary>
+public abstract class FullAuditedAggregateRoot : AuditableAggregateRoot, ISoftDeletable
+{
+    #region ISoftDeletable 实现
+
+    /// <summary>
+    /// 是否已删除
+    /// </summary>
+    public bool IsDeleted { get; set; }
+
+    /// <summary>
+    /// 删除时间（UTC时间）
+    /// </summary>
+    public DateTime? DeletedTime { get; set; }
+
+    /// <summary>
+    /// 删除人ID
+    /// </summary>
+    public long? DeletedBy { get; set; }
+
+    /// <summary>
+    /// 删除人名称
+    /// </summary>
+    public string? DeletedByName { get; set; }
+
+    #endregion
+
+    #region 软删除辅助方法
+
+    /// <summary>
+    /// 设置软删除信息
+    /// </summary>
+    protected void SetDeleteInfo(long userId, string userName)
+    {
+        IsDeleted = true;
+        DeletedTime = DateTime.UtcNow;
+        DeletedBy = userId;
+        DeletedByName = userName;
+    }
+
+    /// <summary>
+    /// 恢复软删除
+    /// </summary>
+    protected void Restore()
+    {
+        IsDeleted = false;
+        DeletedTime = null;
+        DeletedBy = null;
+        DeletedByName = null;
+    }
+
+    #endregion
+}
+```
+
+---
+
+## 值对象基类
+
+```csharp
+// Fountain.Framework.Core/Domain/ValueObject.cs
+namespace Fountain.Framework.Core.Domain;
+
+/// <summary>
+/// 值对象抽象基类
+/// </summary>
+public abstract class ValueObject : IEquatable<ValueObject>
+{
+    /// <summary>
+    /// 获取用于相等性比较的组件集合
+    /// </summary>
+    protected abstract IEnumerable<object?> GetEqualityComponents();
+    
+    public static bool operator ==(ValueObject? left, ValueObject? right)
+    {
+        return Equals(left, right);
+    }
+    
+    public static bool operator !=(ValueObject? left, ValueObject? right)
+    {
+        return !Equals(left, right);
+    }
+    
+    public override bool Equals(object? obj)
+    {
+        return Equals(obj as ValueObject);
+    }
+    
+    public virtual bool Equals(ValueObject? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        
+        return GetEqualityComponents().SequenceEqual(other.GetEqualityComponents());
+    }
+    
+    public override int GetHashCode()
+    {
+        return GetEqualityComponents()
+            .Select(x => x?.GetHashCode() ?? 0)
+            .Aggregate((x, y) => x ^ y);
+    }
+}
+
+/// <summary>
+/// 泛型值对象基类（简化单一值包装）
+/// </summary>
+/// <typeparam name="T">包装的值类型</typeparam>
+public abstract record ValueObject<T> : ValueObject where T : notnull
+{
+    public T Value { get; protected init; }
+    
+    protected ValueObject(T value)
+    {
+        Value = value;
+    }
+    
+    protected override IEnumerable<object?> GetEqualityComponents()
+    {
+        yield return Value;
+    }
+    
+    public override string ToString() => Value.ToString() ?? "";
+    
+    public static implicit operator T(ValueObject<T> valueObject) => valueObject.Value;
+}
+```
+
+---
+
+## 领域异常体系
+
+### 1. 错误级别枚举
+
+```csharp
+// Fountain.Framework.Core/Enums/ErrorLevel.cs
+namespace Fountain.Framework.Core.Enums;
+
+/// <summary>
+/// 错误级别
+/// </summary>
+public enum ErrorLevel
+{
+    /// <summary>
+    /// 业务错误（如：用户名已存在）
+    /// </summary>
+    Business = 0,
+    
+    /// <summary>
+    /// 验证错误（如：邮箱格式不正确）
+    /// </summary>
+    Validation = 1,
+    
+    /// <summary>
+    /// 权限错误（如：无权限访问）
+    /// </summary>
+    Authorization = 2,
+    
+    /// <summary>
+    /// 系统错误（如：数据库连接失败）
+    /// </summary>
+    System = 3
+}
+```
+
+### 2. 领域错误定义
+
+```csharp
+// Fountain.Framework.Core/Errors/DomainError.cs
+using Fountain.Framework.Core.Enums;
+
+namespace Fountain.Framework.Core.Errors;
+
+/// <summary>
+/// 领域错误定义
+/// </summary>
+public class DomainError
+{
+    /// <summary>
+    /// 错误码
+    /// </summary>
+    public string Code { get; }
+    
+    /// <summary>
+    /// 错误消息
+    /// </summary>
+    public string Message { get; }
+    
+    /// <summary>
+    /// 错误级别
+    /// </summary>
+    public ErrorLevel Level { get; }
+    
+    public DomainError(string code, string message, ErrorLevel level = ErrorLevel.Business)
+    {
+        Code = code;
+        Message = message;
+        Level = level;
+    }
+    
+    // 预定义错误
+    public static readonly DomainError NotFound = new("ERR_NOT_FOUND", "数据不存在", ErrorLevel.Business);
+    public static readonly DomainError AlreadyExists = new("ERR_ALREADY_EXISTS", "数据已存在", ErrorLevel.Business);
+    public static readonly DomainError InvalidParameter = new("ERR_INVALID_PARAM", "参数无效", ErrorLevel.Validation);
+    public static readonly DomainError Unauthorized = new("ERR_UNAUTHORIZED", "未授权访问", ErrorLevel.Authorization);
+    public static readonly DomainError Forbidden = new("ERR_FORBIDDEN", "无权限操作", ErrorLevel.Authorization);
+}
+```
+
+### 3. 领域异常基类
+
+```csharp
+// Fountain.Framework.Core/Exceptions/DomainException.cs
+using Fountain.Framework.Core.Enums;
+
+namespace Fountain.Framework.Core.Exceptions;
+
+/// <summary>
+/// 领域异常抽象基类
+/// </summary>
+/// <remarks>
+/// 领域异常用于表示违反业务规则的错误，应由领域模型抛出。
+/// 与系统异常不同，领域异常是业务逻辑的一部分。
+/// </remarks>
+public abstract class DomainException : Exception
+{
+    /// <summary>
+    /// 错误代码，用于客户端识别错误类型
+    /// </summary>
+    public virtual string? Code { get; }
+
+    /// <summary>
+    /// 错误级别，用于错误处理策略
+    /// </summary>
+    public virtual ErrorLevel Level { get; } = ErrorLevel.Business;
+
+    /// <summary>
+    /// 初始化领域异常
+    /// </summary>
+    protected DomainException() { }
+
+    /// <summary>
+    /// 初始化领域异常
+    /// </summary>
+    /// <param name="message">错误消息</param>
+    protected DomainException(string message) : base(message) { }
+
+    /// <summary>
+    /// 初始化领域异常
+    /// </summary>
+    /// <param name="message">错误消息</param>
+    /// <param name="code">错误代码</param>
+    protected DomainException(string message, string code) : base(message)
+    {
+        Code = code;
+    }
+
+    /// <summary>
+    /// 初始化领域异常
+    /// </summary>
+    /// <param name="message">错误消息</param>
+    /// <param name="innerException">内部异常</param>
+    protected DomainException(string message, Exception innerException) 
+        : base(message, innerException) { }
+
+    /// <summary>
+    /// 初始化领域异常
+    /// </summary>
+    /// <param name="message">错误消息</param>
+    /// <param name="code">错误代码</param>
+    /// <param name="level">错误级别</param>
+    protected DomainException(string message, string code, ErrorLevel level) 
+        : base(message)
+    {
+        Code = code;
+        Level = level;
+    }
+}
+```
+
+### 4. 身份领域异常
+
+```csharp
+// Fountain.Service.Identity.Domain/Exceptions/IdentityDomainException.cs
+using Fountain.Framework.Core.Exceptions;
+using Fountain.Framework.Core.Enums;
+using Fountain.Framework.Core.Errors;
+
+namespace Fountain.Service.Identity.Domain.Exceptions;
+
+/// <summary>
+/// 身份领域异常
+/// </summary>
+public class IdentityDomainException : DomainException
+{
+    public long? UserId { get; }
+    public string? UserName { get; }
+    public string? Operation { get; }
+    
+    /// <summary>
+    /// 基础构造函数
+    /// </summary>
+    public IdentityDomainException(
+        string message, 
+        string code, 
+        ErrorLevel level = ErrorLevel.Business,
+        long? userId = null,
+        string? userName = null,
+        string? operation = null) 
+        : base(message, code, level)
+    {
+        UserId = userId;
+        UserName = userName;
+        Operation = operation;
+    }
+    
+    /// <summary>
+    /// 从 DomainError 创建异常
+    /// </summary>
+    public IdentityDomainException(
+        DomainError error,
+        long? userId = null,
+        string? userName = null,
+        string? operation = null)
+        : base(error.Message, error.Code, error.Level)
+    {
+        UserId = userId;
+        UserName = userName;
+        Operation = operation;
+    }
+    
+    /// <summary>
+    /// 简化构造函数（只传消息和错误码）
+    /// </summary>
+    public IdentityDomainException(string message, string code): base(message, code, ErrorLevel.Business)
+    { 
+    }
+    
+    // 预定义异常工厂方法
+    public static IdentityDomainException UserNotFound(long userId)
+        => new("用户不存在", "USER_NOT_FOUND", ErrorLevel.Business, userId);
+    
+    public static IdentityDomainException UserNotFound(string username)
+        => new($"用户 '{username}' 不存在", "USER_NOT_FOUND", ErrorLevel.Business, null, username);
+    
+    public static IdentityDomainException UsernameAlreadyExists(string username)
+        => new($"用户名 '{username}' 已存在", "USERNAME_EXISTS", ErrorLevel.Business, operation: "Register");
+    
+    public static IdentityDomainException EmailAlreadyExists(string email)
+        => new($"邮箱 '{email}' 已存在", "EMAIL_EXISTS", ErrorLevel.Business, operation: "Register");
+    
+    public static IdentityDomainException InvalidPassword()
+        => new("用户名或密码错误", "INVALID_PASSWORD", ErrorLevel.Business, operation: "Login");
+    
+    public static IdentityDomainException AccountLocked(DateTime until)
+        => new($"账户已锁定至 {until:yyyy-MM-dd HH:mm:ss}", "ACCOUNT_LOCKED", ErrorLevel.Business, operation: "Login");
+    
+    public static IdentityDomainException InvalidRefreshToken()
+        => new("刷新令牌无效或已过期", "INVALID_REFRESH_TOKEN", ErrorLevel.Business, operation: "RefreshToken");
+}
+```
+
+---
+
+## 领域实体完整示例
+
+### User 实体（使用 FullAuditedAggregateRoot）
+
+```csharp
+// Fountain.Service.Identity.Domain/Entities/User.cs
+using Fountain.Framework.Core.Domain;
+using Fountain.Framework.Core.Attributes;
+using Fountain.Service.Identity.Domain.Enums;
+using Fountain.Service.Identity.Domain.Events;
+using Fountain.Service.Identity.Domain.Exceptions;
+using Fountain.Service.Identity.Domain.ValueObjects;
+
+namespace Fountain.Service.Identity.Domain.Entities;
+
+/// <summary>
+/// 用户实体（聚合根）
+/// 负责用户的生命周期管理和业务规则
+/// </summary>
+[Entity("Users", "用户表")]
+public class User : FullAuditedAggregateRoot
+{
+    // ========== 私有字段 ==========
+    private readonly List<UserRole> _userRoles = new();
+    private readonly List<RefreshToken> _refreshTokens = new();
+    private readonly List<LoginRecord> _loginRecords = new();
+    
+    // ========== 属性（使用特性配置） ==========
+    
+    /// <summary>
+    /// 用户名（登录账号）
+    /// </summary>
+    [Required]
+    [MaxLength(50, ErrorMessage = "用户名长度不能超过50个字符")]
+    [Index(IsUnique = true, Name = "IX_Users_Username")]
+    public string Username { get; private set; } = string.Empty;
+    
+    /// <summary>
+    /// 昵称（显示名称）
+    /// </summary>
+    [MaxLength(100)]
+    public string? Nickname { get; private set; }
+    
+    /// <summary>
+    /// 邮箱（用于登录和通知）
+    /// </summary>
+    [MaxLength(200)]
+    [Index(IsUnique = true, Name = "IX_Users_Email")]
+    public Email? Email { get; private set; }
+    
+    /// <summary>
+    /// 手机号（用于登录和验证）
+    /// </summary>
+    [MaxLength(20)]
+    [Index(IsUnique = true, Name = "IX_Users_Phone")]
+    public PhoneNumber? Phone { get; private set; }
+    
+    /// <summary>
+    /// 头像URL
+    /// </summary>
+    [MaxLength(500)]
+    public string? Avatar { get; private set; }
+    
+    /// <summary>
+    /// 密码（加密存储）
+    /// </summary>
+    public Password? Password { get; private set; }
+    
+    /// <summary>
+    /// 组织ID
+    /// </summary>
+    [Index(Name = "IX_Users_OrgId")]
+    public long OrgId { get; private set; }
+    
+    /// <summary>
+    /// 用户状态
+    /// </summary>
+    public UserStatus Status { get; private set; } = UserStatus.Active;
+    
+    /// <summary>
+    /// 用户类型
+    /// </summary>
+    public UserType UserType { get; private set; } = UserType.Normal;
+    
+    /// <summary>
+    /// 最后登录时间
+    /// </summary>
+    public DateTime? LastLoginAt { get; private set; }
+    
+    /// <summary>
+    /// 最后密码修改时间
+    /// </summary>
+    public DateTime? LastPasswordChangeAt { get; private set; }
+    
+    /// <summary>
+    /// 登录失败次数
+    /// </summary>
+    public int LoginFailCount { get; private set; }
+    
+    /// <summary>
+    /// 锁定到期时间
+    /// </summary>
+    public DateTime? LockedUntil { get; private set; }
+    
+    // ========== 导航属性 ==========
+    
+    /// <summary>
+    /// 所属组织
+    /// </summary>
+    [Navigation(ForeignKey = "OrgId")]
+    public virtual Organization? Organization { get; private set; }
+    
+    /// <summary>
+    /// 用户角色列表
+    /// </summary>
+    public IReadOnlyCollection<UserRole> UserRoles => _userRoles.AsReadOnly();
+    
+    /// <summary>
+    /// 刷新令牌列表
+    /// </summary>
+    public IReadOnlyCollection<RefreshToken> RefreshTokens => _refreshTokens.AsReadOnly();
+    
+    /// <summary>
+    /// 登录记录列表
+    /// </summary>
+    public IReadOnlyCollection<LoginRecord> LoginRecords => _loginRecords.AsReadOnly();
+    
+    // ========== 计算属性 ==========
+    
+    /// <summary>
+    /// 是否被锁定
+    /// </summary>
+    [NotMapped]
+    public bool IsLocked => LockedUntil.HasValue && LockedUntil.Value > DateTime.UtcNow;
+    
+    /// <summary>
+    /// 显示名称
+    /// </summary>
+    [NotMapped]
+    public string DisplayName => Nickname ?? Username;
+    
+    /// <summary>
+    /// 登录账号（优先邮箱，其次手机号，最后用户名）
+    /// </summary>
+    [NotMapped]
+    public string LoginAccount => Email?.ToString() ?? Phone?.ToString() ?? Username;
+    
+    // ========== 构造函数 ==========
+    
+    /// <summary>
+    /// 私有构造函数（供ORM使用）
+    /// </summary>
+    private User() { }
+    
+    /// <summary>
+    /// 创建新用户（业务构造函数）
+    /// </summary>
+    public User(
+        string username,
+        long orgId,
+        string? nickname = null,
+        Email? email = null,
+        PhoneNumber? phone = null,
+        UserType userType = UserType.Normal)
+    {
+        // 参数验证
+        ValidateUsername(username);
+        
+        // 初始化属性
+        Username = username;
+        OrgId = orgId;
+        Nickname = nickname ?? username;
+        Email = email;
+        Phone = phone;
+        UserType = userType;
+        Status = UserStatus.Active;
+        LoginFailCount = 0;
+        
+        // 设置审计信息
+        // CreatedTime, CreatedBy 等由基础设施层自动设置
+        
+        // 发布领域事件
+        AddDomainEvent(new UserCreatedEvent(Id, username, email?.ToString()));
+    }
+    
+    // ========== 私有验证方法 ==========
+    
+    private static void ValidateUsername(string username)
+    {
+        if (string.IsNullOrWhiteSpace(username))
+            throw IdentityDomainException.UserNotFound(username);
+        if (username.Length < 3 || username.Length > 50)
+            throw new IdentityDomainException("用户名长度必须在3-50位之间", "INVALID_USERNAME");
+    }
+    
+    // ========== 密码管理 ==========
+    
+    /// <summary>
+    /// 设置密码（首次创建或重置）
+    /// </summary>
+    public void SetPassword(string plainPassword, int? expireDays = 90)
+    {
+        if (string.IsNullOrWhiteSpace(plainPassword))
+            throw new IdentityDomainException("密码不能为空", "PASSWORD_EMPTY");
+        if (plainPassword.Length < 6 || plainPassword.Length > 20)
+            throw new IdentityDomainException("密码长度必须在6-20位之间", "INVALID_PASSWORD_LENGTH");
+        
+        Password = Password.Create(plainPassword, expireDays);
+        LastPasswordChangeAt = DateTime.UtcNow;
+        ResetLoginFailures();
+        
+        AddDomainEvent(new UserPasswordSetEvent(Id));
+    }
+    
+    /// <summary>
+    /// 验证密码
+    /// </summary>
+    public bool VerifyPassword(string plainPassword)
+    {
+        if (Password == null)
+            return false;
+        
+        // 检查密码是否过期
+        if (Password.IsExpired())
+        {
+            AddDomainEvent(new UserPasswordExpiredEvent(Id));
+            return false;
+        }
+        
+        var isValid = Password.Verify(plainPassword);
+        
+        if (!isValid)
+        {
+            RecordLoginFailure();
+        }
+        else
+        {
+            ResetLoginFailures();
+        }
+        
+        return isValid;
+    }
+    
+    /// <summary>
+    /// 修改密码（用户主动修改）
+    /// </summary>
+    public void ChangePassword(string oldPassword, string newPassword, int? expireDays = 90)
+    {
+        // 验证原密码
+        if (!VerifyPassword(oldPassword))
+            throw IdentityDomainException.InvalidPassword();
+        
+        // 验证新旧密码不同
+        if (oldPassword == newPassword)
+            throw new IdentityDomainException("新密码不能与原密码相同", "PASSWORD_SAME_AS_OLD");
+        
+        // 修改密码
+        Password = Password.ChangePassword(newPassword, expireDays);
+        LastPasswordChangeAt = DateTime.UtcNow;
+        ResetLoginFailures();
+        
+        // 撤销所有RefreshToken（强制重新登录）
+        RevokeAllRefreshTokens();
+        
+        AddDomainEvent(new UserPasswordChangedEvent(Id));
+    }
+    
+    // ========== 登录管理 ==========
+    
+    private void RecordLoginFailure()
+    {
+        LoginFailCount++;
+        
+        // 连续失败5次，锁定30分钟
+        if (LoginFailCount >= 5)
+        {
+            LockedUntil = DateTime.UtcNow.AddMinutes(30);
+            Status = UserStatus.Locked;
+            AddDomainEvent(new UserLockedEvent(Id, LockedUntil.Value));
+        }
+    }
+    
+    private void ResetLoginFailures()
+    {
+        LoginFailCount = 0;
+        LockedUntil = null;
+        
+        if (Status == UserStatus.Locked)
+        {
+            Status = UserStatus.Active;
+        }
+    }
+    
+    /// <summary>
+    /// 记录登录成功
+    /// </summary>
+    public void RecordLogin(LoginType loginType, string? ipAddress = null, string? userAgent = null)
+    {
+        // 检查用户状态
+        if (Status != UserStatus.Active)
+            throw new IdentityDomainException($"用户状态异常，无法登录。当前状态：{Status}", "USER_STATUS_INVALID");
+        
+        // 检查是否被锁定
+        if (IsLocked)
+            throw IdentityDomainException.AccountLocked(LockedUntil!.Value);
+        
+        LastLoginAt = DateTime.UtcNow;
+        ResetLoginFailures();
+        
+        // 记录登录日志
+        var loginRecord = new LoginRecord(Id, loginType, ipAddress, userAgent);
+        _loginRecords.Add(loginRecord);
+        
+        AddDomainEvent(new UserLoggedInEvent(Id, loginType.ToString(), ipAddress));
+    }
+    
+    // ========== Token管理 ==========
+    
+    public RefreshToken CreateRefreshToken(int expireDays = 7)
+    {
+        _refreshTokens.RemoveAll(t => t.IsExpired);
+        var token = new RefreshToken(Id, expireDays);
+        _refreshTokens.Add(token);
+        AddDomainEvent(new RefreshTokenCreatedEvent(Id, token.Token));
+        return token;
+    }
+    
+    public void RevokeAllRefreshTokens()
+    {
+        foreach (var token in _refreshTokens.Where(t => t.IsActive))
+            token.Revoke();
+        AddDomainEvent(new AllRefreshTokensRevokedEvent(Id));
+    }
+    
+    // ========== 角色管理 ==========
+    
+    public void AssignRole(long roleId)
+    {
+        if (roleId <= 0)
+            throw new IdentityDomainException("角色ID必须大于0", "INVALID_ROLE_ID");
+        
+        if (!_userRoles.Any(ur => ur.RoleId == roleId))
+        {
+            _userRoles.Add(new UserRole(Id, roleId));
+            AddDomainEvent(new UserRoleAssignedEvent(Id, roleId));
+        }
+    }
+    
+    public void UnassignRole(long roleId)
+    {
+        var userRole = _userRoles.FirstOrDefault(ur => ur.RoleId == roleId);
+        if (userRole != null)
+        {
+            _userRoles.Remove(userRole);
+            AddDomainEvent(new UserRoleRevokedEvent(Id, roleId));
+        }
+    }
+    
+    public List<long> GetRoleIds() => _userRoles.Select(ur => ur.RoleId).ToList();
+    
+    // ========== 状态管理 ==========
+    
+    public void Enable()
+    {
+        if (Status == UserStatus.Active) return;
+        Status = UserStatus.Active;
+        ResetLoginFailures();
+        AddDomainEvent(new UserEnabledEvent(Id));
+    }
+    
+    public void Disable()
+    {
+        if (Status == UserStatus.Disabled) return;
+        Status = UserStatus.Disabled;
+        RevokeAllRefreshTokens();
+        AddDomainEvent(new UserDisabledEvent(Id));
+    }
+    
+    // ========== 资料管理 ==========
+    
+    public void UpdateProfile(string? nickname = null, string? avatar = null)
+    {
+        if (nickname != null)
+        {
+            if (string.IsNullOrWhiteSpace(nickname))
+                throw new IdentityDomainException("昵称不能为空", "NICKNAME_EMPTY");
+            if (nickname.Length > 100)
+                throw new IdentityDomainException("昵称长度不能超过100个字符", "NICKNAME_TOO_LONG");
+            Nickname = nickname;
+        }
+        
+        if (avatar != null)
+        {
+            if (!Uri.IsWellFormedUriString(avatar, UriKind.Absolute))
+                throw new IdentityDomainException("头像URL格式不正确", "INVALID_AVATAR_URL");
+            Avatar = avatar;
+        }
+        
+        AddDomainEvent(new UserProfileUpdatedEvent(Id, nickname, avatar));
+    }
+    
+    public void ChangeEmail(Email newEmail)
+    {
+        if (Email == newEmail) return;
+        Email = newEmail;
+        AddDomainEvent(new UserEmailChangedEvent(Id, newEmail.ToString()));
+    }
+    
+    public void ChangeOrganization(long newOrgId)
+    {
+        if (newOrgId <= 0)
+            throw new IdentityDomainException("组织ID必须大于0", "INVALID_ORG_ID");
+        if (OrgId == newOrgId) return;
+        
+        OrgId = newOrgId;
+        AddDomainEvent(new UserOrganizationChangedEvent(Id, OrgId, newOrgId));
+    }
+}
+```
+
+---
+
+## 值对象完整示例
+
+### Email 值对象
+
+```csharp
+// Fountain.Service.Identity.Domain/ValueObjects/Email.cs
+using System.Text.RegularExpressions;
+using Fountain.Framework.Core.Domain;
+using Fountain.Service.Identity.Domain.Exceptions;
+
+namespace Fountain.Service.Identity.Domain.ValueObjects;
+
+/// <summary>
+/// 邮箱值对象
+/// 封装邮箱的验证和格式化逻辑
+/// </summary>
+public record Email : ValueObject<string>
+{
+    private static readonly Regex EmailRegex = new(
+        @"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    
+    private Email(string value) : base(value)
+    {
+    }
+    
+    /// <summary>
+    /// 从字符串创建邮箱
+    /// </summary>
+    public static Email From(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new IdentityDomainException("邮箱不能为空", "EMAIL_EMPTY");
+        
+        value = value.Trim();
+        
+        if (!EmailRegex.IsMatch(value))
+            throw new IdentityDomainException("邮箱格式不正确", "INVALID_EMAIL");
+        
+        value = value.ToLowerInvariant();
+        
+        return new Email(value);
+    }
+    
+    /// <summary>
+    /// 获取邮箱域名
+    /// </summary>
+    public string Domain => Value.Split('@')[1];
+    
+    /// <summary>
+    /// 隐藏部分字符（用于显示）
+    /// </summary>
+    public string Mask()
+    {
+        var parts = Value.Split('@');
+        var username = parts[0];
+        var maskedUsername = username.Length <= 2 
+            ? username 
+            : username.Substring(0, 2) + new string('*', username.Length - 2);
+        return $"{maskedUsername}@{parts[1]}";
+    }
+    
+    public override string ToString() => Value;
+    
+    public static implicit operator string(Email email) => email?.Value ?? string.Empty;
+    public static implicit operator Email(string value) => From(value);
+}
+```
+
+### PhoneNumber 值对象
+
+```csharp
+// Fountain.Service.Identity.Domain/ValueObjects/PhoneNumber.cs
+using System.Text.RegularExpressions;
+using Fountain.Framework.Core.Domain;
+using Fountain.Service.Identity.Domain.Exceptions;
+
+namespace Fountain.Service.Identity.Domain.ValueObjects;
+
+/// <summary>
+/// 手机号值对象
+/// </summary>
+public record PhoneNumber : ValueObject<string>
+{
+    private static readonly Regex PhoneRegex = new(
+        @"^1[3-9]\d{9}$",
+        RegexOptions.Compiled);
+    
+    private PhoneNumber(string value) : base(value)
+    {
+    }
+    
+    public static PhoneNumber From(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new IdentityDomainException("手机号不能为空", "PHONE_EMPTY");
+        
+        var cleaned = Regex.Replace(value, @"[^\d]", "");
+        
+        if (cleaned.Length != 11)
+            throw new IdentityDomainException("手机号必须是11位数字", "INVALID_PHONE_LENGTH");
+        
+        if (!PhoneRegex.IsMatch(cleaned))
+            throw new IdentityDomainException("手机号格式不正确", "INVALID_PHONE");
+        
+        return new PhoneNumber(cleaned);
+    }
+    
+    /// <summary>
+    /// 隐藏中间4位（用于显示）
+    /// </summary>
+    public string Mask()
+    {
+        return $"{Value.Substring(0, 3)}****{Value.Substring(7)}";
+    }
+    
+    public override string ToString() => Value;
+    
+    public static implicit operator string(PhoneNumber phone) => phone?.Value ?? string.Empty;
+    public static implicit operator PhoneNumber(string value) => From(value);
+}
+```
+
+### Password 值对象
+
+```csharp
+// Fountain.Service.Identity.Domain/ValueObjects/Password.cs
+using BCrypt.Net;
+using Fountain.Framework.Core.Domain;
+using Fountain.Service.Identity.Domain.Exceptions;
+
+namespace Fountain.Service.Identity.Domain.ValueObjects;
+
+/// <summary>
+/// 密码值对象
+/// </summary>
+public record Password : ValueObject
+{
+    public string Hash { get; }
+    public DateTime? LastChangedAt { get; }
+    public DateTime? ExpiresAt { get; }
+    
+    private Password(string hash, DateTime? lastChangedAt = null, DateTime? expiresAt = null)
+    {
+        Hash = hash;
+        LastChangedAt = lastChangedAt;
+        ExpiresAt = expiresAt;
+    }
+    
+    /// <summary>
+    /// 创建密码（从明文）
+    /// </summary>
+    public static Password Create(string plainText, int? expireDays = null)
+    {
+        if (string.IsNullOrWhiteSpace(plainText))
+            throw new IdentityDomainException("密码不能为空", "PASSWORD_EMPTY");
+        
+        if (plainText.Length < 6 || plainText.Length > 20)
+            throw new IdentityDomainException("密码长度必须在6-20位之间", "INVALID_PASSWORD_LENGTH");
+        
+        var hash = BCrypt.HashPassword(plainText, BCrypt.GenerateSalt(12));
+        var now = DateTime.UtcNow;
+        
+        return new Password(hash, now, expireDays.HasValue ? now.AddDays(expireDays.Value) : null);
+    }
+    
+    /// <summary>
+    /// 验证密码
+    /// </summary>
+    public bool Verify(string plainText)
+    {
+        if (string.IsNullOrWhiteSpace(plainText))
+            return false;
+        return BCrypt.Verify(plainText, Hash);
+    }
+    
+    /// <summary>
+    /// 检查密码是否过期
+    /// </summary>
+    public bool IsExpired()
+    {
+        return ExpiresAt.HasValue && ExpiresAt.Value <= DateTime.UtcNow;
+    }
+    
+    /// <summary>
+    /// 修改密码
+    /// </summary>
+    public Password ChangePassword(string newPlainText, int? expireDays = null)
+    {
+        return Create(newPlainText, expireDays);
+    }
+    
+    protected override IEnumerable<object?> GetEqualityComponents()
+    {
+        yield return Hash;
+    }
+    
+    public override string ToString() => "******";
+}
+```
+
+---
+
+## 仓储接口定义
+
+```csharp
+// Fountain.Service.Identity.Domain/Repositories/IUserRepository.cs
+using Fountain.Service.Identity.Domain.Entities;
+using Fountain.Service.Identity.Domain.Specifications;
+
+namespace Fountain.Service.Identity.Domain.Repositories;
+
+/// <summary>
+/// 用户仓储接口
+/// </summary>
+public interface IUserRepository
+{
+    // ========== 基础CRUD ==========
+    Task<User?> GetByIdAsync(long id, CancellationToken cancellationToken = default);
+    Task<User?> GetByIdWithRolesAsync(long id, CancellationToken cancellationToken = default);
+    Task<User> AddAsync(User user, CancellationToken cancellationToken = default);
+    Task UpdateAsync(User user, CancellationToken cancellationToken = default);
+    Task DeleteAsync(User user, CancellationToken cancellationToken = default);
+    
+    // ========== 唯一性查询 ==========
+    Task<User?> GetByUsernameAsync(string username, CancellationToken cancellationToken = default);
+    Task<User?> GetByEmailAsync(string email, CancellationToken cancellationToken = default);
+    Task<User?> GetByPhoneAsync(string phone, CancellationToken cancellationToken = default);
+    
+    // ========== 存在性检查 ==========
+    Task<bool> ExistsByUsernameAsync(string username, long? excludeUserId = null, CancellationToken cancellationToken = default);
+    Task<bool> ExistsByEmailAsync(string email, long? excludeUserId = null, CancellationToken cancellationToken = default);
+    Task<bool> ExistsByPhoneAsync(string phone, long? excludeUserId = null, CancellationToken cancellationToken = default);
+    
+    // ========== 分页查询 ==========
+    Task<(List<User> Users, int Total)> GetPagedAsync(
+        UserQuerySpecification spec,
+        int pageIndex,
+        int pageSize,
+        CancellationToken cancellationToken = default);
+}
+```
+
+---
+
+## 基础设施层实现
+
+```csharp
+// Fountain.Service.Identity.Infrastructure/Repositories/UserRepository.cs
+using Fountain.Framework.EntityFrameworkCore;
+using Fountain.Service.Identity.Domain.Entities;
+using Fountain.Service.Identity.Domain.Repositories;
+using Fountain.Service.Identity.Domain.Specifications;
+using Microsoft.EntityFrameworkCore;
+
+namespace Fountain.Service.Identity.Infrastructure.Repositories;
+
+/// <summary>
+/// 用户仓储实现
+/// </summary>
+public class UserRepository : Repository<GenericContext, User>, IUserRepository
+{
+    public UserRepository(GenericContext dbContext) : base(dbContext)
+    {
+    }
+    
+    public async Task<User?> GetByIdWithRolesAsync(long id, CancellationToken cancellationToken = default)
+    {
+        return await GetAsync(
+            u => u.Id == id,
+            query => query.Include(u => u.UserRoles),
+            cancellationToken: cancellationToken);
+    }
+    
+    public async Task<User?> GetByUsernameAsync(string username, CancellationToken cancellationToken = default)
+    {
+        return await GetAsync(u => u.Username == username, cancellationToken);
+    }
+    
+    public async Task<User?> GetByEmailAsync(string email, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return null;
+        return await GetAsync(u => u.Email != null && u.Email.Value == email, cancellationToken);
+    }
+    
+    public async Task<User?> GetByPhoneAsync(string phone, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(phone)) return null;
+        return await GetAsync(u => u.Phone != null && u.Phone.Value == phone, cancellationToken);
+    }
+    
+    public async Task<bool> ExistsByUsernameAsync(string username, long? excludeUserId = null, CancellationToken cancellationToken = default)
+    {
+        var query = GetQueryable().Where(u => u.Username == username);
+        if (excludeUserId.HasValue)
+            query = query.Where(u => u.Id != excludeUserId.Value);
+        return await query.AnyAsync(cancellationToken);
+    }
+    
+    public async Task<bool> ExistsByEmailAsync(string email, long? excludeUserId = null, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return false;
+        var query = GetQueryable().Where(u => u.Email != null && u.Email.Value == email);
+        if (excludeUserId.HasValue)
+            query = query.Where(u => u.Id != excludeUserId.Value);
+        return await query.AnyAsync(cancellationToken);
+    }
+    
+    public async Task<bool> ExistsByPhoneAsync(string phone, long? excludeUserId = null, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(phone)) return false;
+        var query = GetQueryable().Where(u => u.Phone != null && u.Phone.Value == phone);
+        if (excludeUserId.HasValue)
+            query = query.Where(u => u.Id != excludeUserId.Value);
+        return await query.AnyAsync(cancellationToken);
+    }
+    
+    public async Task<(List<User> Users, int Total)> GetPagedAsync(
+        UserQuerySpecification spec,
+        int pageIndex,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var query = GetQueryable();
+        
+        if (!string.IsNullOrWhiteSpace(spec.Keyword))
+        {
+            query = query.Where(u =>
+                u.Username.Contains(spec.Keyword) ||
+                (u.Nickname != null && u.Nickname.Contains(spec.Keyword)) ||
+                (u.Email != null && u.Email.Value.Contains(spec.Keyword)));
+        }
+        
+        if (spec.Status.HasValue)
+            query = query.Where(u => u.Status == spec.Status.Value);
+        
+        if (spec.OrgId.HasValue)
+            query = query.Where(u => u.OrgId == spec.OrgId.Value);
+        
+        var total = await query.CountAsync(cancellationToken);
+        
+        var users = await query
+            .OrderByDescending(u => u.CreatedTime)
+            .Skip((pageIndex - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+        
+        return (users, total);
+    }
+}
+```
+
+---
+
+## 依赖注入配置
+
+```csharp
+// Fountain.Service.Identity.Infrastructure/DependencyInjection.cs
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Fountain.Framework.EntityFrameworkCore;
+using Fountain.Service.Identity.Domain.Repositories;
+using Fountain.Service.Identity.Infrastructure.Repositories;
+
+namespace Fountain.Service.Identity.Infrastructure;
+
+public static class DependencyInjection
+{
+    public static IServiceCollection AddInfrastructure(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        // 注册 DbContext
+        services.AddDbContext<GenericContext>((serviceProvider, options) =>
+        {
+            var connectionString = configuration.GetConnectionString("Default");
+            options.UseSqlServer(connectionString, sqlOptions =>
+            {
+                sqlOptions.MigrationsAssembly(typeof(GenericContext).Assembly.FullName);
+                sqlOptions.EnableRetryOnFailure(3);
+            });
+        });
+        
+        // 注册仓储
+        services.AddScoped<IUserRepository, UserRepository>();
+        
+        return services;
+    }
+}
+```
+
+---
+
+## 最佳实践
+
+### 1. 实体继承选择
+
+| 基类 | 适用场景 |
+|------|----------|
+| `AggregateRoot` | 不需要审计字段的简单实体 |
+| `AuditableAggregateRoot` | 需要记录创建/更新信息 |
+| `FullAuditedAggregateRoot` | 需要审计 + 软删除功能 |
+
+### 2. 异常使用原则
+
+```csharp
+// ✅ 正确：使用领域异常
+throw IdentityDomainException.UserNotFound(userId);
+
+// ✅ 正确：使用预定义错误
+throw new IdentityDomainException(DomainError.NotFound, userId, username);
+
+// ❌ 错误：使用系统异常
+throw new Exception("用户不存在");
+```
+
+### 3. 值对象设计原则
+
+```csharp
+// ✅ 正确：不可变，有验证
+public record Email : ValueObject<string>
+{
+    public static Email From(string value)
+    {
+        // 验证逻辑
+        return new Email(normalizedValue);
+    }
+}
+
+// ❌ 错误：可变值对象
+public class Email
+{
+    public string Value { get; set; }
+}
+```
+
+---
+
+## 常见问题
+
+### Q1: 为什么有三个聚合根基类？
+
+**A**: 提供不同级别的功能，按需选择：
+- `AggregateRoot`：最简，只有领域事件
+- `AuditableAggregateRoot`：增加审计字段
+- `FullAuditedAggregateRoot`：增加审计 + 软删除
+
+### Q2: 软删除如何自动过滤？
+
+**A**: `QueryRepository` 中的 `SoftDeleteFilter` 方法会自动为实现了 `ISoftDeletable` 接口的实体添加 `IsDeleted == 0` 的过滤条件。
+
+### Q3: 审计字段如何自动填充？
+
+**A**: `GenericContext` 中的 `AuditableEntityInterceptor` 拦截器会自动填充审计字段。
+
+### Q4: 如何自定义异常错误码？
+
+**A**: 在 `IdentityDomainException` 中添加静态工厂方法：
+
+```csharp
+public static IdentityDomainException CustomError(string message, string code)
+    => new(message, code);
+```
+
+---
+
+## 版本历史
+
+| 版本 | 日期 | 说明 |
+|------|------|------|
+| 1.0.0 | 2024-01-01 | 初始版本 |
+| 1.1.0 | 2024-06-01 | 完善异常体系 |
+| 2.0.0 | 2024-12-01 | 重构聚合根基类，使用 FullAuditedAggregateRoot |
+
+---
+
+*本文档完*

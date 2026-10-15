@@ -1,0 +1,1197 @@
+# DDD 实体设计完整指南
+
+## 一、实体设计核心原则
+
+### 1. 什么是实体（Entity）
+
+```csharp
+/// <summary>
+/// 实体核心特征：
+/// 1. 有唯一标识（ID）
+/// 2. 可变（状态可以改变）
+/// 3. 通过ID判断相等性（不是通过属性值）
+/// 4. 包含业务逻辑
+/// 5. 保证业务规则（不变量）
+/// </summary>
+```
+
+### 2. 实体 vs 值对象
+
+| 特征 | 实体 | 值对象 |
+|------|------|--------|
+| **唯一标识** | ✅ 有ID | ❌ 无ID |
+| **可变性** | ✅ 可变 | ❌ 不可变 |
+| **相等性** | 通过ID | 通过所有属性 |
+| **生命周期** | 独立 | 依附于实体 |
+| **示例** | User, Order | Email, Money |
+
+## 二、完整的聚合根基类设计
+
+```csharp
+// Fountain.Framework.Core/Domain/AggregateRoot.cs
+namespace Fountain.Framework.Core.Domain;
+
+/// <summary>
+/// 聚合根抽象基类
+/// 聚合根是领域模型的入口，负责维护业务不变量
+/// </summary>
+public abstract class AggregateRoot : IEquatable<AggregateRoot>
+{
+    private readonly List<DomainEvent> _domainEvents = new();
+    
+    /// <summary>
+    /// 领域事件集合
+    /// </summary>
+    public IReadOnlyCollection<DomainEvent> DomainEvents => _domainEvents.AsReadOnly();
+    
+    /// <summary>
+    /// 添加领域事件
+    /// </summary>
+    protected void AddDomainEvent(DomainEvent eventItem)
+    {
+        _domainEvents.Add(eventItem);
+    }
+    
+    /// <summary>
+    /// 移除领域事件
+    /// </summary>
+    protected void RemoveDomainEvent(DomainEvent eventItem)
+    {
+        _domainEvents.Remove(eventItem);
+    }
+    
+    /// <summary>
+    /// 清空所有领域事件
+    /// </summary>
+    public void ClearDomainEvents()
+    {
+        _domainEvents.Clear();
+    }
+    
+    /// <summary>
+    /// 实体相等性比较（通过ID）
+    /// </summary>
+    public override bool Equals(object? obj)
+    {
+        return Equals(obj as AggregateRoot);
+    }
+    
+    public virtual bool Equals(AggregateRoot? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        if (GetType() != other.GetType()) return false;
+        
+        // 通过ID判断相等性
+        var thisId = GetId();
+        var otherId = other.GetId();
+        
+        if (thisId == null || otherId == null) return false;
+        return thisId.Equals(otherId);
+    }
+    
+    public override int GetHashCode()
+    {
+        var id = GetId();
+        return id != null ? id.GetHashCode() : base.GetHashCode();
+    }
+    
+    public static bool operator ==(AggregateRoot? left, AggregateRoot? right)
+    {
+        return Equals(left, right);
+    }
+    
+    public static bool operator !=(AggregateRoot? left, AggregateRoot? right)
+    {
+        return !Equals(left, right);
+    }
+    
+    /// <summary>
+    /// 获取实体ID（子类实现）
+    /// </summary>
+    protected abstract object GetId();
+}
+```
+
+## 三、完整的 User 实体实现
+
+```csharp
+// Fountain.Service.Identity.Domain/Entities/User.cs
+using Fountain.Framework.Core.Domain;
+using Fountain.Service.Identity.Domain.Enums;
+using Fountain.Service.Identity.Domain.Events;
+using Fountain.Service.Identity.Domain.Exceptions;
+using Fountain.Service.Identity.Domain.ValueObjects;
+
+namespace Fountain.Service.Identity.Domain.Entities;
+
+/// <summary>
+/// 用户实体（聚合根）
+/// 负责用户的生命周期管理和业务规则
+/// </summary>
+public class User : AggregateRoot
+{
+    // ========== 私有字段 ==========
+    private readonly List<UserRole> _userRoles = new();
+    private readonly List<RefreshToken> _refreshTokens = new();
+    private readonly List<LoginRecord> _loginRecords = new();
+    
+    // ========== 公开属性 ==========
+    /// <summary>
+    /// 用户ID（唯一标识）
+    /// </summary>
+    public long Id { get; private set; }
+    
+    /// <summary>
+    /// 用户名（登录账号）
+    /// </summary>
+    public string Username { get; private set; } = string.Empty;
+    
+    /// <summary>
+    /// 昵称（显示名称）
+    /// </summary>
+    public string? Nickname { get; private set; }
+    
+    /// <summary>
+    /// 邮箱（用于登录和通知）
+    /// </summary>
+    public Email? Email { get; private set; }
+    
+    /// <summary>
+    /// 手机号（用于登录和验证）
+    /// </summary>
+    public PhoneNumber? Phone { get; private set; }
+    
+    /// <summary>
+    /// 头像URL
+    /// </summary>
+    public string? Avatar { get; private set; }
+    
+    /// <summary>
+    /// 密码（加密存储）
+    /// </summary>
+    public Password? Password { get; private set; }
+    
+    /// <summary>
+    /// 组织ID
+    /// </summary>
+    public long OrgId { get; private set; }
+    
+    /// <summary>
+    /// 用户状态
+    /// </summary>
+    public UserStatus Status { get; private set; } = UserStatus.Active;
+    
+    /// <summary>
+    /// 用户类型
+    /// </summary>
+    public UserType UserType { get; private set; } = UserType.Normal;
+    
+    /// <summary>
+    /// 创建时间
+    /// </summary>
+    public DateTime CreatedAt { get; private set; }
+    
+    /// <summary>
+    /// 更新时间
+    /// </summary>
+    public DateTime? UpdatedAt { get; private set; }
+    
+    /// <summary>
+    /// 最后登录时间
+    /// </summary>
+    public DateTime? LastLoginAt { get; private set; }
+    
+    /// <summary>
+    /// 最后密码修改时间
+    /// </summary>
+    public DateTime? LastPasswordChangeAt { get; private set; }
+    
+    /// <summary>
+    /// 登录失败次数
+    /// </summary>
+    public int LoginFailCount { get; private set; }
+    
+    /// <summary>
+    /// 锁定到期时间
+    /// </summary>
+    public DateTime? LockedUntil { get; private set; }
+    
+    // ========== 导航属性 ==========
+    public virtual Organization? Organization { get; private set; }
+    public IReadOnlyCollection<UserRole> UserRoles => _userRoles.AsReadOnly();
+    public IReadOnlyCollection<RefreshToken> RefreshTokens => _refreshTokens.AsReadOnly();
+    public IReadOnlyCollection<LoginRecord> LoginRecords => _loginRecords.AsReadOnly();
+    
+    // ========== 构造函数 ==========
+    
+    /// <summary>
+    /// 私有构造函数（供ORM使用）
+    /// </summary>
+    private User() { }
+    
+    /// <summary>
+    /// 创建新用户
+    /// </summary>
+    public User(
+        string username,
+        long orgId,
+        string? nickname = null,
+        Email? email = null,
+        PhoneNumber? phone = null,
+        UserType userType = UserType.Normal)
+    {
+        // 参数验证
+        if (string.IsNullOrWhiteSpace(username))
+            throw new DomainException("用户名不能为空");
+            
+        if (username.Length < 3 || username.Length > 50)
+            throw new DomainException("用户名长度必须在3-50位之间");
+            
+        if (orgId <= 0)
+            throw new DomainException("组织ID必须大于0");
+        
+        // 初始化属性
+        Username = username;
+        OrgId = orgId;
+        Nickname = nickname ?? username;
+        Email = email;
+        Phone = phone;
+        UserType = userType;
+        CreatedAt = DateTime.UtcNow;
+        Status = UserStatus.Active;
+        LoginFailCount = 0;
+        
+        // 发布领域事件
+        AddDomainEvent(new UserCreatedEvent(Id, username, email?.ToString()));
+    }
+    
+    // ========== 密码管理 ==========
+    
+    /// <summary>
+    /// 设置密码（首次创建或重置）
+    /// </summary>
+    /// <param name="plainPassword">明文密码</param>
+    /// <param name="expireDays">密码有效期（天）</param>
+    public void SetPassword(string plainPassword, int? expireDays = 90)
+    {
+        if (string.IsNullOrWhiteSpace(plainPassword))
+            throw new DomainException("密码不能为空");
+            
+        if (plainPassword.Length < 6 || plainPassword.Length > 20)
+            throw new DomainException("密码长度必须在6-20位之间");
+        
+        Password = Password.Create(plainPassword, expireDays);
+        LastPasswordChangeAt = DateTime.UtcNow;
+        ResetLoginFailures();
+        UpdatedAt = DateTime.UtcNow;
+        
+        AddDomainEvent(new UserPasswordSetEvent(Id));
+    }
+    
+    /// <summary>
+    /// 验证密码
+    /// </summary>
+    /// <returns>密码是否正确</returns>
+    public bool VerifyPassword(string plainPassword)
+    {
+        if (Password == null)
+            return false;
+            
+        // 检查密码是否过期
+        if (Password.IsExpired())
+        {
+            AddDomainEvent(new UserPasswordExpiredEvent(Id));
+            return false;
+        }
+        
+        var isValid = Password.Verify(plainPassword);
+        
+        if (!isValid)
+        {
+            RecordLoginFailure();
+        }
+        else
+        {
+            ResetLoginFailures();
+        }
+        
+        return isValid;
+    }
+    
+    /// <summary>
+    /// 修改密码（用户主动修改）
+    /// </summary>
+    public void ChangePassword(string oldPassword, string newPassword, int? expireDays = 90)
+    {
+        // 验证原密码
+        if (!VerifyPassword(oldPassword))
+            throw new DomainException("原密码错误");
+            
+        // 验证新旧密码不同
+        if (oldPassword == newPassword)
+            throw new DomainException("新密码不能与原密码相同");
+            
+        // 验证新密码强度
+        if (newPassword.Length < 6 || newPassword.Length > 20)
+            throw new DomainException("新密码长度必须在6-20位之间");
+        
+        // 修改密码
+        Password = Password.ChangePassword(newPassword, expireDays);
+        LastPasswordChangeAt = DateTime.UtcNow;
+        UpdatedAt = DateTime.UtcNow;
+        
+        // 撤销所有RefreshToken（强制重新登录）
+        RevokeAllRefreshTokens();
+        
+        AddDomainEvent(new UserPasswordChangedEvent(Id));
+    }
+    
+    /// <summary>
+    /// 重置密码（管理员操作）
+    /// </summary>
+    public void ResetPassword(string newPassword, int? expireDays = 90)
+    {
+        if (string.IsNullOrWhiteSpace(newPassword))
+            throw new DomainException("新密码不能为空");
+            
+        if (newPassword.Length < 6 || newPassword.Length > 20)
+            throw new DomainException("新密码长度必须在6-20位之间");
+        
+        Password = Password.Create(newPassword, expireDays);
+        LastPasswordChangeAt = DateTime.UtcNow;
+        ResetLoginFailures();
+        UpdatedAt = DateTime.UtcNow;
+        
+        AddDomainEvent(new UserPasswordResetEvent(Id));
+    }
+    
+    /// <summary>
+    /// 检查密码是否需要修改
+    /// </summary>
+    public bool IsPasswordExpired()
+    {
+        return Password != null && Password.IsExpired();
+    }
+    
+    // ========== 登录管理 ==========
+    
+    /// <summary>
+    /// 记录登录失败
+    /// </summary>
+    private void RecordLoginFailure()
+    {
+        LoginFailCount++;
+        UpdatedAt = DateTime.UtcNow;
+        
+        // 连续失败5次，锁定30分钟
+        if (LoginFailCount >= 5)
+        {
+            LockedUntil = DateTime.UtcNow.AddMinutes(30);
+            Status = UserStatus.Locked;
+            AddDomainEvent(new UserLockedEvent(Id, LockedUntil.Value));
+        }
+    }
+    
+    /// <summary>
+    /// 重置登录失败次数
+    /// </summary>
+    private void ResetLoginFailures()
+    {
+        LoginFailCount = 0;
+        LockedUntil = null;
+        
+        // 如果是锁定状态，恢复为正常
+        if (Status == UserStatus.Locked)
+        {
+            Status = UserStatus.Active;
+        }
+    }
+    
+    /// <summary>
+    /// 记录登录成功
+    /// </summary>
+    public void RecordLogin(LoginType loginType, string? ipAddress = null, string? userAgent = null)
+    {
+        // 检查用户状态
+        if (Status != UserStatus.Active)
+            throw new DomainException($"用户状态异常，无法登录。当前状态：{Status}");
+            
+        // 检查是否被锁定
+        if (LockedUntil.HasValue && LockedUntil.Value > DateTime.UtcNow)
+            throw new DomainException($"账户已锁定，请于 {LockedUntil.Value:yyyy-MM-dd HH:mm:ss} 后重试");
+        
+        LastLoginAt = DateTime.UtcNow;
+        ResetLoginFailures();
+        
+        // 记录登录日志
+        var loginRecord = new LoginRecord(Id, loginType, ipAddress, userAgent);
+        _loginRecords.Add(loginRecord);
+        
+        AddDomainEvent(new UserLoggedInEvent(Id, loginType.ToString(), ipAddress));
+    }
+    
+    /// <summary>
+    /// 检查账户是否被锁定
+    /// </summary>
+    public bool IsLocked()
+    {
+        return LockedUntil.HasValue && LockedUntil.Value > DateTime.UtcNow;
+    }
+    
+    // ========== Token管理 ==========
+    
+    /// <summary>
+    /// 创建RefreshToken
+    /// </summary>
+    public RefreshToken CreateRefreshToken(int expireDays = 7)
+    {
+        // 清理过期的Token
+        _refreshTokens.RemoveAll(t => t.IsExpired);
+        
+        var token = new RefreshToken(Id, expireDays);
+        _refreshTokens.Add(token);
+        
+        AddDomainEvent(new RefreshTokenCreatedEvent(Id, token.Token));
+        
+        return token;
+    }
+    
+    /// <summary>
+    /// 撤销所有RefreshToken
+    /// </summary>
+    public void RevokeAllRefreshTokens()
+    {
+        foreach (var token in _refreshTokens.Where(t => t.IsActive))
+        {
+            token.Revoke();
+        }
+        
+        AddDomainEvent(new AllRefreshTokensRevokedEvent(Id));
+    }
+    
+    /// <summary>
+    /// 验证RefreshToken
+    /// </summary>
+    public bool ValidateRefreshToken(string token)
+    {
+        var refreshToken = _refreshTokens.FirstOrDefault(t => t.Token == token);
+        return refreshToken != null && refreshToken.IsActive && !refreshToken.IsExpired;
+    }
+    
+    /// <summary>
+    /// 撤销指定的RefreshToken
+    /// </summary>
+    public void RevokeRefreshToken(string token)
+    {
+        var refreshToken = _refreshTokens.FirstOrDefault(t => t.Token == token);
+        if (refreshToken != null)
+        {
+            refreshToken.Revoke();
+            AddDomainEvent(new RefreshTokenRevokedEvent(Id, token));
+        }
+    }
+    
+    // ========== 角色管理 ==========
+    
+    /// <summary>
+    /// 分配角色
+    /// </summary>
+    public void AssignRole(long roleId)
+    {
+        if (roleId <= 0)
+            throw new DomainException("角色ID必须大于0");
+            
+        if (!_userRoles.Any(ur => ur.RoleId == roleId))
+        {
+            _userRoles.Add(new UserRole(Id, roleId));
+            AddDomainEvent(new UserRoleAssignedEvent(Id, roleId));
+        }
+    }
+    
+    /// <summary>
+    /// 撤销角色
+    /// </summary>
+    public void UnassignRole(long roleId)
+    {
+        var userRole = _userRoles.FirstOrDefault(ur => ur.RoleId == roleId);
+        if (userRole != null)
+        {
+            _userRoles.Remove(userRole);
+            AddDomainEvent(new UserRoleRevokedEvent(Id, roleId));
+        }
+    }
+    
+    /// <summary>
+    /// 批量分配角色
+    /// </summary>
+    public void AssignRoles(IEnumerable<long> roleIds)
+    {
+        foreach (var roleId in roleIds)
+        {
+            AssignRole(roleId);
+        }
+    }
+    
+    /// <summary>
+    /// 获取用户的所有角色ID
+    /// </summary>
+    public List<long> GetRoleIds()
+    {
+        return _userRoles.Select(ur => ur.RoleId).ToList();
+    }
+    
+    /// <summary>
+    /// 检查是否有某个角色
+    /// </summary>
+    public bool HasRole(long roleId)
+    {
+        return _userRoles.Any(ur => ur.RoleId == roleId);
+    }
+    
+    // ========== 状态管理 ==========
+    
+    /// <summary>
+    /// 启用用户
+    /// </summary>
+    public void Enable()
+    {
+        if (Status == UserStatus.Active)
+            return;
+            
+        Status = UserStatus.Active;
+        ResetLoginFailures();
+        UpdatedAt = DateTime.UtcNow;
+        
+        AddDomainEvent(new UserEnabledEvent(Id));
+    }
+    
+    /// <summary>
+    /// 禁用用户
+    /// </summary>
+    public void Disable()
+    {
+        if (Status == UserStatus.Disabled)
+            return;
+            
+        Status = UserStatus.Disabled;
+        RevokeAllRefreshTokens();
+        UpdatedAt = DateTime.UtcNow;
+        
+        AddDomainEvent(new UserDisabledEvent(Id));
+    }
+    
+    /// <summary>
+    /// 解锁用户
+    /// </summary>
+    public void Unlock()
+    {
+        if (Status != UserStatus.Locked)
+            return;
+            
+        Status = UserStatus.Active;
+        ResetLoginFailures();
+        UpdatedAt = DateTime.UtcNow;
+        
+        AddDomainEvent(new UserUnlockedEvent(Id));
+    }
+    
+    // ========== 资料管理 ==========
+    
+    /// <summary>
+    /// 更新个人资料
+    /// </summary>
+    public void UpdateProfile(string? nickname = null, string? avatar = null)
+    {
+        if (nickname != null)
+        {
+            if (string.IsNullOrWhiteSpace(nickname))
+                throw new DomainException("昵称不能为空");
+                
+            if (nickname.Length > 100)
+                throw new DomainException("昵称长度不能超过100个字符");
+                
+            Nickname = nickname;
+        }
+        
+        if (avatar != null)
+        {
+            if (!Uri.IsWellFormedUriString(avatar, UriKind.Absolute))
+                throw new DomainException("头像URL格式不正确");
+                
+            Avatar = avatar;
+        }
+        
+        UpdatedAt = DateTime.UtcNow;
+        
+        AddDomainEvent(new UserProfileUpdatedEvent(Id, nickname, avatar));
+    }
+    
+    /// <summary>
+    /// 修改邮箱
+    /// </summary>
+    public void ChangeEmail(Email newEmail)
+    {
+        if (Email == newEmail)
+            return;
+            
+        Email = newEmail;
+        UpdatedAt = DateTime.UtcNow;
+        
+        AddDomainEvent(new UserEmailChangedEvent(Id, newEmail.ToString()));
+    }
+    
+    /// <summary>
+    /// 修改手机号
+    /// </summary>
+    public void ChangePhone(PhoneNumber newPhone)
+    {
+        if (Phone == newPhone)
+            return;
+            
+        Phone = newPhone;
+        UpdatedAt = DateTime.UtcNow;
+        
+        AddDomainEvent(new UserPhoneChangedEvent(Id, newPhone.ToString()));
+    }
+    
+    /// <summary>
+    /// 修改组织
+    /// </summary>
+    public void ChangeOrganization(long newOrgId)
+    {
+        if (newOrgId <= 0)
+            throw new DomainException("组织ID必须大于0");
+            
+        if (OrgId == newOrgId)
+            return;
+            
+        var oldOrgId = OrgId;
+        OrgId = newOrgId;
+        UpdatedAt = DateTime.UtcNow;
+        
+        AddDomainEvent(new UserOrganizationChangedEvent(Id, oldOrgId, newOrgId));
+    }
+    
+    // ========== 查询方法 ==========
+    
+    /// <summary>
+    /// 获取显示名称
+    /// </summary>
+    public string GetDisplayName()
+    {
+        return Nickname ?? Username;
+    }
+    
+    /// <summary>
+    /// 获取登录账号（优先邮箱，其次手机号，最后用户名）
+    /// </summary>
+    public string GetLoginAccount()
+    {
+        if (Email != null)
+            return Email.ToString();
+            
+        if (Phone != null)
+            return Phone.ToString();
+            
+        return Username;
+    }
+    
+    /// <summary>
+    /// 检查账户是否有效
+    /// </summary>
+    public bool IsActive()
+    {
+        return Status == UserStatus.Active && !IsLocked();
+    }
+    
+    /// <summary>
+    /// 获取实体ID（供基类使用）
+    /// </summary>
+    protected override object GetId() => Id;
+}
+```
+
+## 四、完整的仓储接口
+
+```csharp
+// Fountain.Service.Identity.Domain/Repositories/IUserRepository.cs
+using Fountain.Service.Identity.Domain.Entities;
+using Fountain.Service.Identity.Domain.Specifications;
+
+namespace Fountain.Service.Identity.Domain.Repositories;
+
+/// <summary>
+/// 用户仓储接口
+/// 定义用户聚合根的持久化操作
+/// </summary>
+public interface IUserRepository
+{
+    // ========== 基础CRUD ==========
+    
+    /// <summary>
+    /// 根据ID获取用户
+    /// </summary>
+    Task<User?> GetByIdAsync(long id, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// 根据ID获取用户（包含角色信息）
+    /// </summary>
+    Task<User?> GetByIdWithRolesAsync(long id, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// 添加用户
+    /// </summary>
+    Task<User> AddAsync(User user, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// 更新用户
+    /// </summary>
+    Task UpdateAsync(User user, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// 删除用户（软删除）
+    /// </summary>
+    Task DeleteAsync(User user, CancellationToken cancellationToken = default);
+    
+    // ========== 唯一性查询 ==========
+    
+    /// <summary>
+    /// 根据用户名获取用户
+    /// </summary>
+    Task<User?> GetByUsernameAsync(string username, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// 根据邮箱获取用户
+    /// </summary>
+    Task<User?> GetByEmailAsync(string email, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// 根据手机号获取用户
+    /// </summary>
+    Task<User?> GetByPhoneAsync(string phone, CancellationToken cancellationToken = default);
+    
+    // ========== 存在性检查 ==========
+    
+    /// <summary>
+    /// 检查用户名是否存在
+    /// </summary>
+    Task<bool> ExistsByUsernameAsync(string username, long? excludeUserId = null, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// 检查邮箱是否存在
+    /// </summary>
+    Task<bool> ExistsByEmailAsync(string email, long? excludeUserId = null, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// 检查手机号是否存在
+    /// </summary>
+    Task<bool> ExistsByPhoneAsync(string phone, long? excludeUserId = null, CancellationToken cancellationToken = default);
+    
+    // ========== 批量查询 ==========
+    
+    /// <summary>
+    /// 获取用户列表（按角色）
+    /// </summary>
+    Task<List<User>> GetByRoleIdAsync(long roleId, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// 获取用户列表（按组织）
+    /// </summary>
+    Task<List<User>> GetByOrgIdAsync(long orgId, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// 获取用户列表（按ID列表）
+    /// </summary>
+    Task<List<User>> GetByIdsAsync(IEnumerable<long> ids, CancellationToken cancellationToken = default);
+    
+    // ========== 分页查询 ==========
+    
+    /// <summary>
+    /// 分页查询用户
+    /// </summary>
+    Task<(List<User> Users, int Total)> GetPagedAsync(
+        UserQuerySpecification spec, 
+        int pageIndex, 
+        int pageSize, 
+        CancellationToken cancellationToken = default);
+    
+    // ========== 统计查询 ==========
+    
+    /// <summary>
+    /// 统计用户数量
+    /// </summary>
+    Task<int> CountAsync(UserQuerySpecification? spec = null, CancellationToken cancellationToken = default);
+    
+    /// <summary>
+    /// 获取今日新增用户数
+    /// </summary>
+    Task<int> GetTodayNewCountAsync(CancellationToken cancellationToken = default);
+}
+```
+
+## 五、查询规约（Specification）
+
+```csharp
+// Fountain.Service.Identity.Domain/Specifications/UserQuerySpecification.cs
+namespace Fountain.Service.Identity.Domain.Specifications;
+
+/// <summary>
+/// 用户查询规约
+/// 封装查询条件，避免查询逻辑污染仓储
+/// </summary>
+public class UserQuerySpecification
+{
+    public string? Keyword { get; set; }
+    public UserStatus? Status { get; set; }
+    public UserType? UserType { get; set; }
+    public long? OrgId { get; set; }
+    public List<long>? RoleIds { get; set; }
+    public DateTime? StartTime { get; set; }
+    public DateTime? EndTime { get; set; }
+    public bool? IsPasswordSet { get; set; }
+    
+    /// <summary>
+    /// 是否为空查询条件
+    /// </summary>
+    public bool IsEmpty()
+    {
+        return Keyword == null 
+            && Status == null 
+            && UserType == null 
+            && OrgId == null 
+            && (RoleIds == null || !RoleIds.Any())
+            && StartTime == null 
+            && EndTime == null 
+            && IsPasswordSet == null;
+    }
+}
+```
+
+## 六、用户仓储实现
+
+```csharp
+// Fountain.Service.Identity.Infrastructure/Repositories/UserRepository.cs
+using Fountain.Framework.EntityFrameworkCore;
+using Fountain.Service.Identity.Domain.Entities;
+using Fountain.Service.Identity.Domain.Repositories;
+using Fountain.Service.Identity.Domain.Specifications;
+using Microsoft.EntityFrameworkCore;
+
+namespace Fountain.Service.Identity.Infrastructure.Repositories;
+
+/// <summary>
+/// 用户仓储实现
+/// </summary>
+public class UserRepository : IUserRepository
+{
+    private readonly Repository<GenericContext, User> _repository;
+    private readonly GenericContext _dbContext;
+    
+    public UserRepository(GenericContext dbContext)
+    {
+        _dbContext = dbContext;
+        _repository = new Repository<GenericContext, User>(dbContext);
+    }
+    
+    #region 基础CRUD
+    
+    public async Task<User?> GetByIdAsync(long id, CancellationToken cancellationToken = default)
+    {
+        return await _repository.GetByIdAsync(id, cancellationToken: cancellationToken);
+    }
+    
+    public async Task<User?> GetByIdWithRolesAsync(long id, CancellationToken cancellationToken = default)
+    {
+        return await _repository.GetAsync(
+            u => u.Id == id,
+            query => query.Include(u => u.UserRoles).ThenInclude(ur => ur.Role),
+            cancellationToken: cancellationToken
+        );
+    }
+    
+    public async Task<User> AddAsync(User user, CancellationToken cancellationToken = default)
+    {
+        await _repository.AddAsync(user, cancellationToken);
+        return user;
+    }
+    
+    public async Task UpdateAsync(User user, CancellationToken cancellationToken = default)
+    {
+        _repository.Update(user);
+        await Task.CompletedTask;
+    }
+    
+    public async Task DeleteAsync(User user, CancellationToken cancellationToken = default)
+    {
+        await _repository.SoftDeleteByIdAsync(user.Id, cancellationToken);
+    }
+    
+    #endregion
+    
+    #region 唯一性查询
+    
+    public async Task<User?> GetByUsernameAsync(string username, CancellationToken cancellationToken = default)
+    {
+        return await _repository.GetAsync(
+            u => u.Username == username,
+            cancellationToken: cancellationToken
+        );
+    }
+    
+    public async Task<User?> GetByEmailAsync(string email, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+            return null;
+            
+        return await _repository.GetAsync(
+            u => u.Email != null && u.Email.Value == email,
+            cancellationToken: cancellationToken
+        );
+    }
+    
+    public async Task<User?> GetByPhoneAsync(string phone, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(phone))
+            return null;
+            
+        return await _repository.GetAsync(
+            u => u.Phone != null && u.Phone.Value == phone,
+            cancellationToken: cancellationToken
+        );
+    }
+    
+    #endregion
+    
+    #region 存在性检查
+    
+    public async Task<bool> ExistsByUsernameAsync(string username, long? excludeUserId = null, CancellationToken cancellationToken = default)
+    {
+        var query = _repository.GetQueryable()
+            .Where(u => u.Username == username);
+            
+        if (excludeUserId.HasValue)
+            query = query.Where(u => u.Id != excludeUserId.Value);
+            
+        return await query.AnyAsync(cancellationToken);
+    }
+    
+    public async Task<bool> ExistsByEmailAsync(string email, long? excludeUserId = null, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+            return false;
+            
+        var query = _repository.GetQueryable()
+            .Where(u => u.Email != null && u.Email.Value == email);
+            
+        if (excludeUserId.HasValue)
+            query = query.Where(u => u.Id != excludeUserId.Value);
+            
+        return await query.AnyAsync(cancellationToken);
+    }
+    
+    public async Task<bool> ExistsByPhoneAsync(string phone, long? excludeUserId = null, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(phone))
+            return false;
+            
+        var query = _repository.GetQueryable()
+            .Where(u => u.Phone != null && u.Phone.Value == phone);
+            
+        if (excludeUserId.HasValue)
+            query = query.Where(u => u.Id != excludeUserId.Value);
+            
+        return await query.AnyAsync(cancellationToken);
+    }
+    
+    #endregion
+    
+    #region 批量查询
+    
+    public async Task<List<User>> GetByRoleIdAsync(long roleId, CancellationToken cancellationToken = default)
+    {
+        return await _repository.GetListAsync(
+            u => u.UserRoles.Any(ur => ur.RoleId == roleId),
+            cancellationToken: cancellationToken
+        );
+    }
+    
+    public async Task<List<User>> GetByOrgIdAsync(long orgId, CancellationToken cancellationToken = default)
+    {
+        return await _repository.GetListAsync(
+            u => u.OrgId == orgId,
+            cancellationToken: cancellationToken
+        );
+    }
+    
+    public async Task<List<User>> GetByIdsAsync(IEnumerable<long> ids, CancellationToken cancellationToken = default)
+    {
+        var idList = ids.ToList();
+        if (!idList.Any())
+            return new List<User>();
+            
+        return await _repository.GetListAsync(
+            u => idList.Contains(u.Id),
+            cancellationToken: cancellationToken
+        );
+    }
+    
+    #endregion
+    
+    #region 分页查询
+    
+    public async Task<(List<User> Users, int Total)> GetPagedAsync(
+        UserQuerySpecification spec,
+        int pageIndex,
+        int pageSize,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _repository.GetQueryable();
+        
+        // 应用查询条件
+        if (!string.IsNullOrWhiteSpace(spec.Keyword))
+        {
+            query = query.Where(u => 
+                u.Username.Contains(spec.Keyword) || 
+                (u.Nickname != null && u.Nickname.Contains(spec.Keyword)) ||
+                (u.Email != null && u.Email.Value.Contains(spec.Keyword)) ||
+                (u.Phone != null && u.Phone.Value.Contains(spec.Keyword)));
+        }
+        
+        if (spec.Status.HasValue)
+            query = query.Where(u => u.Status == spec.Status.Value);
+            
+        if (spec.UserType.HasValue)
+            query = query.Where(u => u.UserType == spec.UserType.Value);
+            
+        if (spec.OrgId.HasValue)
+            query = query.Where(u => u.OrgId == spec.OrgId.Value);
+            
+        if (spec.RoleIds != null && spec.RoleIds.Any())
+        {
+            query = query.Where(u => u.UserRoles.Any(ur => spec.RoleIds.Contains(ur.RoleId)));
+        }
+        
+        if (spec.StartTime.HasValue)
+            query = query.Where(u => u.CreatedAt >= spec.StartTime.Value);
+            
+        if (spec.EndTime.HasValue)
+            query = query.Where(u => u.CreatedAt <= spec.EndTime.Value);
+            
+        if (spec.IsPasswordSet.HasValue)
+        {
+            query = spec.IsPasswordSet.Value
+                ? query.Where(u => u.Password != null)
+                : query.Where(u => u.Password == null);
+        }
+        
+        // 获取总数
+        var total = await query.CountAsync(cancellationToken);
+        
+        // 分页
+        var users = await query
+            .OrderByDescending(u => u.CreatedAt)
+            .Skip((pageIndex - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync(cancellationToken);
+            
+        return (users, total);
+    }
+    
+    #endregion
+    
+    #region 统计查询
+    
+    public async Task<int> CountAsync(UserQuerySpecification? spec = null, CancellationToken cancellationToken = default)
+    {
+        if (spec == null || spec.IsEmpty())
+            return await _repository.GetCountAsync(cancellationToken: cancellationToken);
+            
+        var (_, total) = await GetPagedAsync(spec, 1, 1, cancellationToken);
+        return total;
+    }
+    
+    public async Task<int> GetTodayNewCountAsync(CancellationToken cancellationToken = default)
+    {
+        var today = DateTime.UtcNow.Date;
+        return await _repository.GetCountAsync(
+            u => u.CreatedAt >= today,
+            cancellationToken: cancellationToken
+        );
+    }
+    
+    #endregion
+}
+```
+
+## 七、使用示例
+
+```csharp
+// 应用层使用
+public class UserRegistrationService
+{
+    private readonly IUserRepository _userRepository;
+    
+    public UserRegistrationService(IUserRepository userRepository)
+    {
+        _userRepository = userRepository;
+    }
+    
+    public async Task<long> RegisterAsync(RegisterCommand command)
+    {
+        // 1. 验证唯一性
+        if (await _userRepository.ExistsByUsernameAsync(command.Username))
+            throw new BusinessException("用户名已存在");
+            
+        if (!string.IsNullOrEmpty(command.Email) && 
+            await _userRepository.ExistsByEmailAsync(command.Email))
+            throw new BusinessException("邮箱已存在");
+        
+        // 2. 创建用户实体
+        var email = string.IsNullOrEmpty(command.Email) ? null : Email.From(command.Email);
+        var user = new User(
+            username: command.Username,
+            orgId: command.OrgId,
+            nickname: command.Nickname,
+            email: email
+        );
+        
+        // 3. 设置密码
+        if (!string.IsNullOrEmpty(command.Password))
+            user.SetPassword(command.Password);
+        
+        // 4. 分配角色
+        if (command.RoleIds != null && command.RoleIds.Any())
+            user.AssignRoles(command.RoleIds);
+        
+        // 5. 保存
+        await _userRepository.AddAsync(user);
+        
+        return user.Id;
+    }
+}
+```
+
+## 八、总结
+
+### 实体设计要点
+
+| 要点 | 说明 |
+|------|------|
+| **唯一标识** | 每个实体必须有唯一的ID |
+| **私有构造函数** | 供ORM使用，不暴露给业务层 |
+| **只读集合** | 返回IReadOnlyCollection保护集合 |
+| **业务方法** | 暴露业务行为，不暴露内部状态 |
+| **领域事件** | 记录业务发生的重要事情 |
+| **不变量** | 在方法中保证业务规则 |
+| **私有字段** | 集合等需要维护的字段私有化 |
+
+### 关键原则
+
+1. **封装性**：实体应该保护自己的内部状态
+2. **行为驱动**：通过方法改变状态，不直接暴露Setter
+3. **业务规则**：在实体内部保证业务不变量
+4. **自验证**：实体创建时验证参数
+5. **领域事件**：重要的业务发生要发布事件
+
+这套设计确保了实体的完整性和业务规则的封装，是DDD的核心实践。

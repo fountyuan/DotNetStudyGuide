@@ -1,0 +1,1052 @@
+根据您的 Domain 层和 Infrastructure 层，我来为您设计 Application 层的完整代码。
+
+## Application 层目录结构
+
+```
+Fountain.Service.Identity.Application/
+├── Common/
+│   ├── Interfaces/
+│   │   └── ICurrentUser.cs
+│   ├── Mappings/
+│   │   └── MappingProfile.cs
+│   └── Behaviors/
+│       ├── ValidationBehavior.cs
+│       └── LoggingBehavior.cs
+├── DTOs/
+│   ├── Common/
+│   │   ├── ApiResponse.cs
+│   │   └── PaginatedResult.cs
+│   ├── Users/
+│   │   ├── UserDto.cs
+│   │   ├── CreateUserDto.cs
+│   │   ├── UpdateUserDto.cs
+│   │   └── UserListDto.cs
+│   ├── Roles/
+│   │   ├── RoleDto.cs
+│   │   ├── CreateRoleDto.cs
+│   │   └── UpdateRoleDto.cs
+│   ├── Menus/
+│   │   ├── MenuDto.cs
+│   │   └── MenuTreeDto.cs
+│   ├── Organizations/
+│   │   ├── OrganizationDto.cs
+│   │   └── OrganizationTreeDto.cs
+│   └── Auth/
+│       ├── LoginDto.cs
+│       ├── LoginResponseDto.cs
+│       ├── RefreshTokenDto.cs
+│       └── PermissionDto.cs
+├── Commands/
+│   ├── Users/
+│   │   ├── CreateUserCommand.cs
+│   │   ├── UpdateUserCommand.cs
+│   │   ├── DeleteUserCommand.cs
+│   │   └── ChangePasswordCommand.cs
+│   ├── Roles/
+│   │   ├── CreateRoleCommand.cs
+│   │   ├── UpdateRoleCommand.cs
+│   │   └── DeleteRoleCommand.cs
+│   ├── Menus/
+│   │   ├── CreateMenuCommand.cs
+│   │   ├── UpdateMenuCommand.cs
+│   │   └── DeleteMenuCommand.cs
+│   └── Organizations/
+│       ├── CreateOrganizationCommand.cs
+│       ├── UpdateOrganizationCommand.cs
+│       └── DeleteOrganizationCommand.cs
+├── Queries/
+│   ├── Users/
+│   │   ├── GetUserByIdQuery.cs
+│   │   ├── GetUserListQuery.cs
+│   │   └── GetCurrentUserQuery.cs
+│   ├── Roles/
+│   │   ├── GetRoleByIdQuery.cs
+│   │   └── GetRoleListQuery.cs
+│   ├── Menus/
+│   │   ├── GetMenuTreeQuery.cs
+│   │   └── GetUserMenusQuery.cs
+│   └── Organizations/
+│       ├── GetOrganizationByIdQuery.cs
+│       └── GetOrganizationTreeQuery.cs
+├── Handlers/
+│   ├── Users/
+│   │   ├── CreateUserCommandHandler.cs
+│   │   ├── UpdateUserCommandHandler.cs
+│   │   ├── DeleteUserCommandHandler.cs
+│   │   ├── ChangePasswordCommandHandler.cs
+│   │   ├── GetUserByIdQueryHandler.cs
+│   │   └── GetUserListQueryHandler.cs
+│   ├── Roles/
+│   │   ├── CreateRoleCommandHandler.cs
+│   │   ├── UpdateRoleCommandHandler.cs
+│   │   ├── DeleteRoleCommandHandler.cs
+│   │   ├── GetRoleByIdQueryHandler.cs
+│   │   └── GetRoleListQueryHandler.cs
+│   ├── Menus/
+│   │   ├── CreateMenuCommandHandler.cs
+│   │   ├── UpdateMenuCommandHandler.cs
+│   │   ├── DeleteMenuCommandHandler.cs
+│   │   ├── GetMenuTreeQueryHandler.cs
+│   │   └── GetUserMenusQueryHandler.cs
+│   ├── Organizations/
+│   │   ├── CreateOrganizationCommandHandler.cs
+│   │   ├── UpdateOrganizationCommandHandler.cs
+│   │   ├── DeleteOrganizationCommandHandler.cs
+│   │   ├── GetOrganizationByIdQueryHandler.cs
+│   │   └── GetOrganizationTreeQueryHandler.cs
+│   └── Auth/
+│       ├── LoginCommandHandler.cs
+│       ├── RefreshTokenCommandHandler.cs
+│       └── LogoutCommandHandler.cs
+├── Services/
+│   └── CurrentUserService.cs
+└── Fountain.Service.Identity.Application.csproj
+```
+
+## 1. DTOs
+
+### Common/ApiResponse.cs
+
+```csharp
+namespace Fountain.Service.Identity.Application.DTOs.Common;
+
+/// <summary>
+/// API响应基类
+/// </summary>
+public class ApiResponse<T>
+{
+    public bool Success { get; set; }
+    public string? Message { get; set; }
+    public string? Code { get; set; }
+    public T? Data { get; set; }
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+
+    public static ApiResponse<T> Ok(T? data = default, string? message = null)
+    {
+        return new ApiResponse<T>
+        {
+            Success = true,
+            Data = data,
+            Message = message ?? "操作成功"
+        };
+    }
+
+    public static ApiResponse<T> Fail(string message, string? code = null)
+    {
+        return new ApiResponse<T>
+        {
+            Success = false,
+            Message = message,
+            Code = code
+        };
+    }
+}
+```
+
+### Common/PaginatedResult.cs
+
+```csharp
+namespace Fountain.Service.Identity.Application.DTOs.Common;
+
+/// <summary>
+/// 分页结果
+/// </summary>
+public class PaginatedResult<T>
+{
+    public List<T> Items { get; set; } = new();
+    public int PageIndex { get; set; }
+    public int PageSize { get; set; }
+    public long TotalCount { get; set; }
+    public int TotalPages => (int)Math.Ceiling(TotalCount / (double)PageSize);
+    public bool HasPreviousPage => PageIndex > 1;
+    public bool HasNextPage => PageIndex < TotalPages;
+
+    public PaginatedResult() { }
+
+    public PaginatedResult(List<T> items, long totalCount, int pageIndex, int pageSize)
+    {
+        Items = items;
+        TotalCount = totalCount;
+        PageIndex = pageIndex;
+        PageSize = pageSize;
+    }
+}
+```
+
+### Users/UserDto.cs
+
+```csharp
+namespace Fountain.Service.Identity.Application.DTOs.Users;
+
+/// <summary>
+/// 用户DTO
+/// </summary>
+public class UserDto
+{
+    public long Id { get; set; }
+    public string Username { get; set; } = string.Empty;
+    public string? Nickname { get; set; }
+    public string? Email { get; set; }
+    public string? Phone { get; set; }
+    public string? Avatar { get; set; }
+    public long OrgId { get; set; }
+    public string? OrgName { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string UserType { get; set; } = string.Empty;
+    public DateTime? LastLoginAt { get; set; }
+    public DateTime CreatedAt { get; set; }
+    public List<long> RoleIds { get; set; } = new();
+    public List<string> RoleNames { get; set; } = new();
+}
+```
+
+### Users/CreateUserDto.cs
+
+```csharp
+using System.ComponentModel.DataAnnotations;
+
+namespace Fountain.Service.Identity.Application.DTOs.Users;
+
+/// <summary>
+/// 创建用户DTO
+/// </summary>
+public class CreateUserDto
+{
+    [Required(ErrorMessage = "用户名不能为空")]
+    [MaxLength(50, ErrorMessage = "用户名长度不能超过50个字符")]
+    public string Username { get; set; } = string.Empty;
+
+    [MaxLength(100, ErrorMessage = "昵称长度不能超过100个字符")]
+    public string? Nickname { get; set; }
+
+    [EmailAddress(ErrorMessage = "邮箱格式不正确")]
+    [MaxLength(200, ErrorMessage = "邮箱长度不能超过200个字符")]
+    public string? Email { get; set; }
+
+    [Phone(ErrorMessage = "手机号格式不正确")]
+    [MaxLength(20, ErrorMessage = "手机号长度不能超过20个字符")]
+    public string? Phone { get; set; }
+
+    [Required(ErrorMessage = "密码不能为空")]
+    [MinLength(6, ErrorMessage = "密码长度不能少于6位")]
+    [MaxLength(20, ErrorMessage = "密码长度不能超过20位")]
+    public string Password { get; set; } = string.Empty;
+
+    [Required(ErrorMessage = "组织ID不能为空")]
+    public long OrgId { get; set; }
+
+    public string? Avatar { get; set; }
+    public List<long> RoleIds { get; set; } = new();
+}
+```
+
+### Auth/LoginDto.cs
+
+```csharp
+using System.ComponentModel.DataAnnotations;
+
+namespace Fountain.Service.Identity.Application.DTOs.Auth;
+
+/// <summary>
+/// 登录请求DTO
+/// </summary>
+public class LoginDto
+{
+    [Required(ErrorMessage = "账号不能为空")]
+    public string Account { get; set; } = string.Empty;
+
+    [Required(ErrorMessage = "密码不能为空")]
+    public string Password { get; set; } = string.Empty;
+
+    public string? CaptchaId { get; set; }
+    public string? CaptchaCode { get; set; }
+}
+```
+
+### Auth/LoginResponseDto.cs
+
+```csharp
+namespace Fountain.Service.Identity.Application.DTOs.Auth;
+
+/// <summary>
+/// 登录响应DTO
+/// </summary>
+public class LoginResponseDto
+{
+    public long UserId { get; set; }
+    public string Username { get; set; } = string.Empty;
+    public string? Nickname { get; set; }
+    public string? Avatar { get; set; }
+    public string Token { get; set; } = string.Empty;
+    public string RefreshToken { get; set; } = string.Empty;
+    public DateTime ExpiresAt { get; set; }
+    public List<string> Permissions { get; set; } = new();
+    public List<MenuTreeDto> Menus { get; set; } = new();
+}
+```
+
+### Menus/MenuTreeDto.cs
+
+```csharp
+namespace Fountain.Service.Identity.Application.DTOs.Menus;
+
+/// <summary>
+/// 菜单树DTO
+/// </summary>
+public class MenuTreeDto
+{
+    public long Id { get; set; }
+    public long ParentId { get; set; }
+    public string MenuName { get; set; } = string.Empty;
+    public string MenuType { get; set; } = string.Empty;
+    public string? Path { get; set; }
+    public string? Component { get; set; }
+    public string? Permission { get; set; }
+    public string? Icon { get; set; }
+    public int Sort { get; set; }
+    public bool Visible { get; set; }
+    public List<MenuTreeDto> Children { get; set; } = new();
+}
+```
+
+## 2. Commands
+
+### Users/CreateUserCommand.cs
+
+```csharp
+using MediatR;
+using Fountain.Service.Identity.Application.DTOs.Users;
+
+namespace Fountain.Service.Identity.Application.Commands.Users;
+
+/// <summary>
+/// 创建用户命令
+/// </summary>
+public class CreateUserCommand : IRequest<UserDto>
+{
+    public CreateUserDto Data { get; set; } = null!;
+}
+```
+
+### Users/UpdateUserCommand.cs
+
+```csharp
+using MediatR;
+using Fountain.Service.Identity.Application.DTOs.Users;
+
+namespace Fountain.Service.Identity.Application.Commands.Users;
+
+/// <summary>
+/// 更新用户命令
+/// </summary>
+public class UpdateUserCommand : IRequest<UserDto>
+{
+    public long Id { get; set; }
+    public UpdateUserDto Data { get; set; } = null!;
+}
+```
+
+### Users/DeleteUserCommand.cs
+
+```csharp
+using MediatR;
+
+namespace Fountain.Service.Identity.Application.Commands.Users;
+
+/// <summary>
+/// 删除用户命令
+/// </summary>
+public class DeleteUserCommand : IRequest<bool>
+{
+    public long Id { get; set; }
+}
+```
+
+### Users/ChangePasswordCommand.cs
+
+```csharp
+using MediatR;
+
+namespace Fountain.Service.Identity.Application.Commands.Users;
+
+/// <summary>
+/// 修改密码命令
+/// </summary>
+public class ChangePasswordCommand : IRequest<bool>
+{
+    public long UserId { get; set; }
+    public string OldPassword { get; set; } = string.Empty;
+    public string NewPassword { get; set; } = string.Empty;
+}
+```
+
+### Auth/LoginCommand.cs
+
+```csharp
+using MediatR;
+using Fountain.Service.Identity.Application.DTOs.Auth;
+
+namespace Fountain.Service.Identity.Application.Commands.Auth;
+
+/// <summary>
+/// 登录命令
+/// </summary>
+public class LoginCommand : IRequest<LoginResponseDto>
+{
+    public LoginDto Data { get; set; } = null!;
+    public string? IpAddress { get; set; }
+    public string? UserAgent { get; set; }
+}
+```
+
+### Auth/RefreshTokenCommand.cs
+
+```csharp
+using MediatR;
+using Fountain.Service.Identity.Application.DTOs.Auth;
+
+namespace Fountain.Service.Identity.Application.Commands.Auth;
+
+/// <summary>
+/// 刷新Token命令
+/// </summary>
+public class RefreshTokenCommand : IRequest<LoginResponseDto>
+{
+    public string RefreshToken { get; set; } = string.Empty;
+    public string? IpAddress { get; set; }
+}
+```
+
+### Auth/LogoutCommand.cs
+
+```csharp
+using MediatR;
+
+namespace Fountain.Service.Identity.Application.Commands.Auth;
+
+/// <summary>
+/// 登出命令
+/// </summary>
+public class LogoutCommand : IRequest<bool>
+{
+    public long UserId { get; set; }
+    public string RefreshToken { get; set; } = string.Empty;
+}
+```
+
+## 3. Queries
+
+### Users/GetUserByIdQuery.cs
+
+```csharp
+using MediatR;
+using Fountain.Service.Identity.Application.DTOs.Users;
+
+namespace Fountain.Service.Identity.Application.Queries.Users;
+
+/// <summary>
+/// 根据ID获取用户查询
+/// </summary>
+public class GetUserByIdQuery : IRequest<UserDto?>
+{
+    public long Id { get; set; }
+}
+```
+
+### Users/GetUserListQuery.cs
+
+```csharp
+using MediatR;
+using Fountain.Service.Identity.Application.DTOs.Common;
+using Fountain.Service.Identity.Application.DTOs.Users;
+
+namespace Fountain.Service.Identity.Application.Queries.Users;
+
+/// <summary>
+/// 获取用户列表查询
+/// </summary>
+public class GetUserListQuery : IRequest<PaginatedResult<UserListDto>>
+{
+    public int PageIndex { get; set; } = 1;
+    public int PageSize { get; set; } = 20;
+    public string? Keyword { get; set; }
+    public long? OrgId { get; set; }
+    public string? Status { get; set; }
+}
+```
+
+### Menus/GetUserMenusQuery.cs
+
+```csharp
+using MediatR;
+using Fountain.Service.Identity.Application.DTOs.Menus;
+
+namespace Fountain.Service.Identity.Application.Queries.Menus;
+
+/// <summary>
+/// 获取用户菜单查询
+/// </summary>
+public class GetUserMenusQuery : IRequest<List<MenuTreeDto>>
+{
+    public long UserId { get; set; }
+}
+```
+
+## 4. Handlers
+
+### Users/CreateUserCommandHandler.cs
+
+```csharp
+using MediatR;
+using AutoMapper;
+using Fountain.Service.Identity.Application.Commands.Users;
+using Fountain.Service.Identity.Application.DTOs.Users;
+using Fountain.Service.Identity.Domain.Entities;
+using Fountain.Service.Identity.Domain.Repositories;
+using Fountain.Service.Identity.Domain.ValueObjects;
+
+namespace Fountain.Service.Identity.Application.Handlers.Users;
+
+/// <summary>
+/// 创建用户命令处理器
+/// </summary>
+public class CreateUserCommandHandler : IRequestHandler<CreateUserCommand, UserDto>
+{
+    private readonly IUserRepository _userRepository;
+    private readonly IRoleRepository _roleRepository;
+    private readonly IOrganizationRepository _organizationRepository;
+    private readonly IMapper _mapper;
+    private readonly ICurrentUser _currentUser;
+
+    public CreateUserCommandHandler(
+        IUserRepository userRepository,
+        IRoleRepository roleRepository,
+        IOrganizationRepository organizationRepository,
+        IMapper mapper,
+        ICurrentUser currentUser)
+    {
+        _userRepository = userRepository;
+        _roleRepository = roleRepository;
+        _organizationRepository = organizationRepository;
+        _mapper = mapper;
+        _currentUser = currentUser;
+    }
+
+    public async Task<UserDto> Handle(CreateUserCommand request, CancellationToken cancellationToken)
+    {
+        var dto = request.Data;
+
+        // 验证用户名唯一性
+        var exists = await _userRepository.ExistsByUsernameAsync(dto.Username, cancellationToken: cancellationToken);
+        if (exists)
+            throw new InvalidOperationException($"用户名 {dto.Username} 已存在");
+
+        // 验证邮箱唯一性
+        if (!string.IsNullOrEmpty(dto.Email))
+        {
+            exists = await _userRepository.ExistsByEmailAsync(dto.Email, cancellationToken: cancellationToken);
+            if (exists)
+                throw new InvalidOperationException($"邮箱 {dto.Email} 已被使用");
+        }
+
+        // 验证手机号唯一性
+        if (!string.IsNullOrEmpty(dto.Phone))
+        {
+            exists = await _userRepository.ExistsByPhoneAsync(dto.Phone, cancellationToken: cancellationToken);
+            if (exists)
+                throw new InvalidOperationException($"手机号 {dto.Phone} 已被使用");
+        }
+
+        // 验证组织存在
+        var org = await _organizationRepository.GetByIdAsync(dto.OrgId, cancellationToken);
+        if (org == null)
+            throw new InvalidOperationException($"组织 {dto.OrgId} 不存在");
+
+        // 创建用户
+        var email = !string.IsNullOrEmpty(dto.Email) ? new Email(dto.Email) : null;
+        var phone = !string.IsNullOrEmpty(dto.Phone) ? new PhoneNumber(dto.Phone) : null;
+        
+        var user = new User(
+            dto.Username,
+            dto.OrgId,
+            dto.Nickname,
+            email,
+            phone,
+            createdBy: _currentUser.Id,
+            createdByName: _currentUser.Name ?? dto.Username);
+
+        // 设置密码
+        user.SetPassword(dto.Password);
+
+        // 分配角色
+        foreach (var roleId in dto.RoleIds)
+        {
+            var role = await _roleRepository.GetByIdAsync(roleId, cancellationToken);
+            if (role != null)
+            {
+                user.AssignRole(roleId);
+            }
+        }
+
+        // 保存
+        var created = await _userRepository.AddAsync(user, cancellationToken);
+        
+        return _mapper.Map<UserDto>(created);
+    }
+}
+```
+
+### Users/GetUserListQueryHandler.cs
+
+```csharp
+using MediatR;
+using AutoMapper;
+using Fountain.Framework.Core.Specifications.Query;
+using Fountain.Service.Identity.Application.DTOs.Common;
+using Fountain.Service.Identity.Application.DTOs.Users;
+using Fountain.Service.Identity.Application.Queries.Users;
+using Fountain.Service.Identity.Domain.Entities;
+using Fountain.Service.Identity.Domain.Repositories;
+using Fountain.Service.Identity.Domain.Services;
+
+namespace Fountain.Service.Identity.Application.Handlers.Users;
+
+/// <summary>
+/// 获取用户列表查询处理器
+/// </summary>
+public class GetUserListQueryHandler : IRequestHandler<GetUserListQuery, PaginatedResult<UserListDto>>
+{
+    private readonly IUserRepository _userRepository;
+    private readonly IDataScopeService _dataScopeService;
+    private readonly IMapper _mapper;
+    private readonly ICurrentUser _currentUser;
+
+    public GetUserListQueryHandler(
+        IUserRepository userRepository,
+        IDataScopeService dataScopeService,
+        IMapper mapper,
+        ICurrentUser currentUser)
+    {
+        _userRepository = userRepository;
+        _dataScopeService = dataScopeService;
+        _mapper = mapper;
+        _currentUser = currentUser;
+    }
+
+    public async Task<PaginatedResult<UserListDto>> Handle(GetUserListQuery request, CancellationToken cancellationToken)
+    {
+        // 获取当前用户的数据权限范围
+        var authorizedOrgIds = await _dataScopeService.GetAuthorizedOrgIdsAsync(_currentUser.Id, cancellationToken);
+        
+        // 构建规约
+        var spec = new PaginationSpecification<User>();
+        
+        // 添加组织权限过滤
+        if (authorizedOrgIds.Any())
+        {
+            spec.Conditions.Add(u => authorizedOrgIds.Contains(u.OrgId));
+        }
+        
+        // 添加关键词过滤
+        if (!string.IsNullOrEmpty(request.Keyword))
+        {
+            spec.Conditions.Add(u => 
+                u.Username.Contains(request.Keyword) || 
+                (u.Nickname != null && u.Nickname.Contains(request.Keyword)) ||
+                (u.Email != null && u.Email.Value.Contains(request.Keyword)) ||
+                (u.Phone != null && u.Phone.Value.Contains(request.Keyword)));
+        }
+        
+        // 添加组织过滤
+        if (request.OrgId.HasValue)
+        {
+            spec.Conditions.Add(u => u.OrgId == request.OrgId.Value);
+        }
+        
+        // 添加状态过滤
+        if (!string.IsNullOrEmpty(request.Status))
+        {
+            // 状态过滤逻辑
+        }
+        
+        // 分页查询
+        var (users, total) = await _userRepository.GetPagedAsync(spec, request.PageIndex, request.PageSize, cancellationToken);
+        
+        var dtos = _mapper.Map<List<UserListDto>>(users);
+        
+        return new PaginatedResult<UserListDto>(dtos, total, request.PageIndex, request.PageSize);
+    }
+}
+```
+
+### Auth/LoginCommandHandler.cs
+
+```csharp
+using MediatR;
+using AutoMapper;
+using Fountain.Service.Identity.Application.Commands.Auth;
+using Fountain.Service.Identity.Application.DTOs.Auth;
+using Fountain.Service.Identity.Application.DTOs.Menus;
+using Fountain.Service.Identity.Domain.Services;
+
+namespace Fountain.Service.Identity.Application.Handlers.Auth;
+
+/// <summary>
+/// 登录命令处理器
+/// </summary>
+public class LoginCommandHandler : IRequestHandler<LoginCommand, LoginResponseDto>
+{
+    private readonly IAuthService _authService;
+    private readonly IPermissionService _permissionService;
+    private readonly IMapper _mapper;
+
+    public LoginCommandHandler(
+        IAuthService authService,
+        IPermissionService permissionService,
+        IMapper mapper)
+    {
+        _authService = authService;
+        _permissionService = permissionService;
+        _mapper = mapper;
+    }
+
+    public async Task<LoginResponseDto> Handle(LoginCommand request, CancellationToken cancellationToken)
+    {
+        var (user, token, refreshToken) = await _authService.LoginByPasswordAsync(
+            request.Data.Account,
+            request.Data.Password,
+            request.IpAddress,
+            request.UserAgent,
+            cancellationToken);
+
+        // 获取用户权限
+        var permissions = await _permissionService.GetUserPermissionsAsync(user.Id, cancellationToken);
+        
+        // 获取用户菜单
+        var menus = await _permissionService.GetUserMenusAsync(user.Id, cancellationToken);
+        var menuDtos = _mapper.Map<List<MenuTreeDto>>(menus);
+
+        return new LoginResponseDto
+        {
+            UserId = user.Id,
+            Username = user.Username,
+            Nickname = user.Nickname,
+            Avatar = user.Avatar,
+            Token = token,
+            RefreshToken = refreshToken.Token,
+            ExpiresAt = refreshToken.ExpiresAt,
+            Permissions = permissions.Select(p => p.ToString()).ToList(),
+            Menus = menuDtos
+        };
+    }
+}
+```
+
+## 5. Mapping Profile
+
+```csharp
+using AutoMapper;
+using Fountain.Service.Identity.Application.DTOs.Menus;
+using Fountain.Service.Identity.Application.DTOs.Organizations;
+using Fountain.Service.Identity.Application.DTOs.Roles;
+using Fountain.Service.Identity.Application.DTOs.Users;
+using Fountain.Service.Identity.Domain.Entities;
+
+namespace Fountain.Service.Identity.Application.Common.Mappings;
+
+/// <summary>
+/// AutoMapper配置
+/// </summary>
+public class MappingProfile : Profile
+{
+    public MappingProfile()
+    {
+        // User mappings
+        CreateMap<User, UserDto>()
+            .ForMember(dest => dest.Email, opt => opt.MapFrom(src => src.Email != null ? src.Email.Value : null))
+            .ForMember(dest => dest.Phone, opt => opt.MapFrom(src => src.Phone != null ? src.Phone.Value : null))
+            .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()))
+            .ForMember(dest => dest.UserType, opt => opt.MapFrom(src => src.UserType.ToString()))
+            .ForMember(dest => dest.RoleIds, opt => opt.MapFrom(src => src.UserRoles.Select(ur => ur.RoleId)))
+            .ForMember(dest => dest.RoleNames, opt => opt.Ignore());
+
+        CreateMap<User, UserListDto>()
+            .ForMember(dest => dest.Email, opt => opt.MapFrom(src => src.Email != null ? src.Email.Value : null))
+            .ForMember(dest => dest.Phone, opt => opt.MapFrom(src => src.Phone != null ? src.Phone.Value : null))
+            .ForMember(dest => dest.Status, opt => opt.MapFrom(src => src.Status.ToString()))
+            .ForMember(dest => dest.OrgName, opt => opt.Ignore());
+
+        // Role mappings
+        CreateMap<Role, RoleDto>()
+            .ForMember(dest => dest.DataScopeType, opt => opt.MapFrom(src => src.DataScope.Scope.ToString()))
+            .ForMember(dest => dest.CustomOrgIds, opt => opt.MapFrom(src => src.DataScope.CustomOrgIds))
+            .ForMember(dest => dest.MenuIds, opt => opt.MapFrom(src => src.RoleMenus.Select(rm => rm.MenuId)));
+
+        // Menu mappings
+        CreateMap<Menu, MenuDto>();
+        CreateMap<Menu, MenuTreeDto>()
+            .ForMember(dest => dest.MenuType, opt => opt.MapFrom(src => src.MenuType.ToString()))
+            .ForMember(dest => dest.Children, opt => opt.MapFrom(src => src.Children));
+
+        // Organization mappings
+        CreateMap<Organization, OrganizationDto>()
+            .ForMember(dest => dest.OrgType, opt => opt.MapFrom(src => src.OrgType.ToString()));
+            
+        CreateMap<Organization, OrganizationTreeDto>()
+            .ForMember(dest => dest.OrgType, opt => opt.MapFrom(src => src.OrgType.ToString()))
+            .ForMember(dest => dest.Children, opt => opt.MapFrom(src => src.Children));
+    }
+}
+```
+
+## 6. ICurrentUser Interface
+
+```csharp
+namespace Fountain.Service.Identity.Application.Common.Interfaces;
+
+/// <summary>
+/// 当前用户接口
+/// </summary>
+public interface ICurrentUser
+{
+    long Id { get; }
+    string? Name { get; }
+    string? UserName { get; }
+    string? Email { get; }
+    string? Phone { get; }
+    long OrgId { get; }
+    bool IsAuthenticated { get; }
+    bool HasPermission(string permission);
+    Task<bool> HasPermissionAsync(string permission);
+    List<string> GetPermissions();
+}
+```
+
+## 7. CurrentUserService Implementation
+
+```csharp
+using System.Security.Claims;
+using Fountain.Service.Identity.Application.Common.Interfaces;
+using Fountain.Service.Identity.Domain.Services;
+using Microsoft.AspNetCore.Http;
+
+namespace Fountain.Service.Identity.Application.Services;
+
+/// <summary>
+/// 当前用户服务实现
+/// </summary>
+public class CurrentUserService : ICurrentUser
+{
+    private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IPermissionService _permissionService;
+    private ClaimsPrincipal? _user;
+
+    public CurrentUserService(IHttpContextAccessor httpContextAccessor, IPermissionService permissionService)
+    {
+        _httpContextAccessor = httpContextAccessor;
+        _permissionService = permissionService;
+        _user = _httpContextAccessor.HttpContext?.User;
+    }
+
+    public long Id => GetClaimValue<long>(ClaimTypes.NameIdentifier);
+    public string? Name => GetClaimValue<string>(ClaimTypes.Name);
+    public string? UserName => GetClaimValue<string>("preferred_username");
+    public string? Email => GetClaimValue<string>(ClaimTypes.Email);
+    public string? Phone => GetClaimValue<string>(ClaimTypes.MobilePhone);
+    public long OrgId => GetClaimValue<long>("org_id");
+    public bool IsAuthenticated => _user?.Identity?.IsAuthenticated ?? false;
+
+    public bool HasPermission(string permission)
+    {
+        var permissions = GetPermissions();
+        return permissions.Contains(permission);
+    }
+
+    public async Task<bool> HasPermissionAsync(string permission)
+    {
+        return await _permissionService.CheckPermissionAsync(Id, permission);
+    }
+
+    public List<string> GetPermissions()
+    {
+        var permissionClaim = _user?.FindFirst("permissions");
+        if (permissionClaim == null)
+            return new List<string>();
+        
+        return permissionClaim.Value.Split(',').ToList();
+    }
+
+    private T GetClaimValue<T>(string claimType)
+    {
+        var claim = _user?.FindFirst(claimType);
+        if (claim == null)
+            return default!;
+
+        return (T)Convert.ChangeType(claim.Value, typeof(T));
+    }
+}
+```
+
+## 8. Fountain.Service.Identity.Application.csproj
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AutoMapper" Version="12.0.1" />
+    <PackageReference Include="AutoMapper.Extensions.Microsoft.DependencyInjection" Version="12.0.1" />
+    <PackageReference Include="FluentValidation" Version="11.8.0" />
+    <PackageReference Include="FluentValidation.DependencyInjectionExtensions" Version="11.8.0" />
+    <PackageReference Include="MediatR" Version="12.1.1" />
+    <PackageReference Include="Microsoft.AspNetCore.Http.Abstractions" Version="2.2.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Fountain.Service.Identity.Domain\Fountain.Service.Identity.Domain.csproj" />
+    <ProjectReference Include="..\Fountain.Service.Identity.Infrastructure\Fountain.Service.Identity.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
+```
+
+## 9. Dependency Injection Extension
+
+```csharp
+using FluentValidation;
+using MediatR;
+using Microsoft.Extensions.DependencyInjection;
+using System.Reflection;
+using Fountain.Service.Identity.Application.Common.Interfaces;
+using Fountain.Service.Identity.Application.Services;
+
+namespace Fountain.Service.Identity.Application;
+
+/// <summary>
+/// 应用层依赖注入扩展
+/// </summary>
+public static class DependencyInjection
+{
+    public static IServiceCollection AddApplication(this IServiceCollection services)
+    {
+        // 注册 MediatR
+        services.AddMediatR(cfg => {
+            cfg.RegisterServicesFromAssembly(Assembly.GetExecutingAssembly());
+        });
+
+        // 注册 AutoMapper
+        services.AddAutoMapper(Assembly.GetExecutingAssembly());
+
+        // 注册 FluentValidation
+        services.AddValidatorsFromAssembly(Assembly.GetExecutingAssembly());
+
+        // 注册当前用户服务
+        services.AddScoped<ICurrentUser, CurrentUserService>();
+        services.AddHttpContextAccessor();
+
+        return services;
+    }
+}
+```
+
+## 10. 使用示例（Controller）
+
+```csharp
+using MediatR;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Fountain.Service.Identity.Application.Commands.Auth;
+using Fountain.Service.Identity.Application.Commands.Users;
+using Fountain.Service.Identity.Application.DTOs.Auth;
+using Fountain.Service.Identity.Application.DTOs.Common;
+using Fountain.Service.Identity.Application.DTOs.Users;
+using Fountain.Service.Identity.Application.Queries.Users;
+
+namespace Fountain.Service.Identity.API.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+[Authorize]
+public class UsersController : ControllerBase
+{
+    private readonly IMediator _mediator;
+
+    public UsersController(IMediator mediator)
+    {
+        _mediator = mediator;
+    }
+
+    [HttpGet]
+    public async Task<ActionResult<ApiResponse<PaginatedResult<UserListDto>>>> GetList([FromQuery] GetUserListQuery query)
+    {
+        var result = await _mediator.Send(query);
+        return Ok(ApiResponse<PaginatedResult<UserListDto>>.Ok(result));
+    }
+
+    [HttpGet("{id}")]
+    public async Task<ActionResult<ApiResponse<UserDto>>> GetById(long id)
+    {
+        var result = await _mediator.Send(new GetUserByIdQuery { Id = id });
+        return Ok(ApiResponse<UserDto>.Ok(result));
+    }
+
+    [HttpPost]
+    public async Task<ActionResult<ApiResponse<UserDto>>> Create([FromBody] CreateUserCommand command)
+    {
+        var result = await _mediator.Send(command);
+        return Ok(ApiResponse<UserDto>.Ok(result, "创建成功"));
+    }
+
+    [HttpPut("{id}")]
+    public async Task<ActionResult<ApiResponse<UserDto>>> Update(long id, [FromBody] UpdateUserCommand command)
+    {
+        command.Id = id;
+        var result = await _mediator.Send(command);
+        return Ok(ApiResponse<UserDto>.Ok(result, "更新成功"));
+    }
+
+    [HttpDelete("{id}")]
+    public async Task<ActionResult<ApiResponse<bool>>> Delete(long id)
+    {
+        var result = await _mediator.Send(new DeleteUserCommand { Id = id });
+        return Ok(ApiResponse<bool>.Ok(result, "删除成功"));
+    }
+}
+
+[ApiController]
+[Route("api/[controller]")]
+[AllowAnonymous]
+public class AuthController : ControllerBase
+{
+    private readonly IMediator _mediator;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+
+    public AuthController(IMediator mediator, IHttpContextAccessor httpContextAccessor)
+    {
+        _mediator = mediator;
+        _httpContextAccessor = httpContextAccessor;
+    }
+
+    [HttpPost("login")]
+    public async Task<ActionResult<ApiResponse<LoginResponseDto>>> Login([FromBody] LoginDto dto)
+    {
+        var command = new LoginCommand
+        {
+            Data = dto,
+            IpAddress = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString(),
+            UserAgent = _httpContextAccessor.HttpContext?.Request.Headers["User-Agent"].ToString()
+        };
+        
+        var result = await _mediator.Send(command);
+        return Ok(ApiResponse<LoginResponseDto>.Ok(result, "登录成功"));
+    }
+}
+```
+
+这就是完整的 Application 层实现，遵循了 CQRS 模式和 MediatR 架构。

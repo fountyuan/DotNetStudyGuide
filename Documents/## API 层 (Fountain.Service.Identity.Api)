@@ -1,0 +1,1141 @@
+## API 层 (Fountain.Service.Identity.Api)
+
+API 层是系统的**入口层**，负责接收 HTTP 请求、调用 Application 层、返回 HTTP 响应。它是整个架构的最外层。
+
+## 一、API 层的职责
+
+| 职责 | 说明 |
+|------|------|
+| **接收请求** | 处理 HTTP 请求，路由到对应的 Controller |
+| **参数绑定** | 从 Query/Body/Route 绑定参数 |
+| **认证授权** | JWT 认证、权限验证 |
+| **调用应用层** | 调用 Application 层的 Command/Query |
+| **响应返回** | 统一格式返回 JSON 响应 |
+| **异常处理** | 全局异常过滤，统一错误响应 |
+| **API 文档** | Swagger/OpenAPI 文档生成 |
+
+## 二、目录结构
+
+```
+Fountain.Service.Identity.Api/
+├── Controllers/
+│   ├── AuthController.cs
+│   ├── UsersController.cs
+│   ├── RolesController.cs
+│   ├── MenusController.cs
+│   ├── OrganizationsController.cs
+│   └── PermissionsController.cs
+├── Filters/
+│   ├── GlobalExceptionFilter.cs
+│   ├── ApiResultFilter.cs
+│   └── PermissionFilter.cs
+├── Middleware/
+│   ├── RequestLoggingMiddleware.cs
+│   └── CorrelationIdMiddleware.cs
+├── Extensions/
+│   ├── ServiceCollectionExtensions.cs
+│   ├── SwaggerExtensions.cs
+│   └── AuthenticationExtensions.cs
+├── Program.cs
+├── appsettings.json
+└── Fountain.Service.Identity.Api.csproj
+```
+
+## 三、完整代码实现
+
+### 1. Program.cs
+
+```csharp
+using Fountain.Service.Identity.Api.Extensions;
+using Fountain.Service.Identity.Api.Filters;
+using Fountain.Service.Identity.Application;
+using Fountain.Service.Identity.Infrastructure.Extensions;
+using Fountain.Service.Identity.Infrastructure.Repositories;
+using Fountain.Service.Identity.Infrastructure.Services;
+using Serilog;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// 配置 Serilog 日志
+Log.Logger = new LoggerConfiguration()
+    .ReadFrom.Configuration(builder.Configuration)
+    .Enrich.FromLogContext()
+    .Enrich.WithCorrelationId()
+    .WriteTo.Console()
+    .WriteTo.File("logs/identity-.txt", rollingInterval: RollingInterval.Day)
+    .CreateLogger();
+
+builder.Host.UseSerilog();
+
+// 添加服务
+builder.Services.AddControllers(options =>
+{
+    options.Filters.Add<GlobalExceptionFilter>();
+    options.Filters.Add<ApiResultFilter>();
+})
+.AddJsonOptions(options =>
+{
+    options.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+    options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+});
+
+// 添加 API 文档
+builder.Services.AddSwaggerDocumentation();
+
+// 添加 JWT 认证
+builder.Services.AddJwtAuthentication(builder.Configuration);
+
+// 添加授权策略
+builder.Services.AddAuthorizationPolicies();
+
+// 添加 CORS
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("Default", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyMethod()
+              .AllowAnyHeader();
+    });
+});
+
+// 添加缓存服务
+builder.Services.AddMemoryCache();
+
+// 注册基础设施层
+builder.Services.AddIdentityInfrastructure(builder.Configuration);
+
+// 注册应用层
+builder.Services.AddApplication();
+
+// 注册仓储和服务
+builder.Services.AddScoped<ISsoSessionRepository, SsoSessionRepository>();
+builder.Services.AddScoped<IDataScopeService, DataScopeService>();
+builder.Services.AddScoped<IPermissionService, PermissionService>();
+builder.Services.AddScoped<ISsoService, SsoService>();
+
+// 注册 HTTP 上下文访问器
+builder.Services.AddHttpContextAccessor();
+
+var app = builder.Build();
+
+// 配置管道
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwaggerDocumentation();
+}
+
+app.UseHttpsRedirection();
+app.UseCors("Default");
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseMiddleware<RequestLoggingMiddleware>();
+app.UseMiddleware<CorrelationIdMiddleware>();
+
+app.MapControllers();
+
+// 自动迁移数据库
+using (var scope = app.Services.CreateScope())
+{
+    var context = scope.ServiceProvider.GetRequiredService<GenericContext>();
+    // context.Database.Migrate(); // 生产环境使用
+}
+
+app.Run();
+```
+
+### 2. Controllers/BaseApiController.cs
+
+```csharp
+using MediatR;
+using Microsoft.AspNetCore.Mvc;
+using Fountain.Service.Identity.Application.DTOs.Common;
+
+namespace Fountain.Service.Identity.Api.Controllers;
+
+/// <summary>
+/// API 控制器基类
+/// </summary>
+[ApiController]
+[Route("api/[controller]")]
+[Produces("application/json")]
+public abstract class BaseApiController : ControllerBase
+{
+    private ISender? _mediator;
+    protected ISender Mediator => _mediator ??= HttpContext.RequestServices.GetRequiredService<ISender>();
+
+    /// <summary>
+    /// 成功响应
+    /// </summary>
+    protected IActionResult Success<T>(T? data = default, string? message = null)
+    {
+        return Ok(ApiResponse<T>.Ok(data, message));
+    }
+
+    /// <summary>
+    /// 成功响应（无数据）
+    /// </summary>
+    protected IActionResult Success(string? message = null)
+    {
+        return Ok(ApiResponse<object>.Ok(null, message));
+    }
+
+    /// <summary>
+    /// 失败响应
+    /// </summary>
+    protected IActionResult Failure(string message, string? code = null, int statusCode = 400)
+    {
+        return StatusCode(statusCode, ApiResponse<object>.Fail(message, code));
+    }
+
+    /// <summary>
+    /// 未找到响应
+    /// </summary>
+    protected IActionResult NotFoundResponse(string message = "资源不存在")
+    {
+        return NotFound(ApiResponse<object>.Fail(message, "NOT_FOUND"));
+    }
+
+    /// <summary>
+    /// 未授权响应
+    /// </summary>
+    protected IActionResult UnauthorizedResponse(string message = "未授权访问")
+    {
+        return Unauthorized(ApiResponse<object>.Fail(message, "UNAUTHORIZED"));
+    }
+
+    /// <summary>
+    /// 禁止访问响应
+    /// </summary>
+    protected IActionResult ForbiddenResponse(string message = "无权限访问")
+    {
+        return StatusCode(403, ApiResponse<object>.Fail(message, "FORBIDDEN"));
+    }
+}
+```
+
+### 3. Controllers/AuthController.cs
+
+```csharp
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Fountain.Service.Identity.Application.Commands.Auth;
+using Fountain.Service.Identity.Application.DTOs.Auth;
+using Fountain.Service.Identity.Application.DTOs.Common;
+using Fountain.Service.Identity.Application.Queries.Menus;
+using Fountain.Service.Identity.Application.Common.Interfaces;
+
+namespace Fountain.Service.Identity.Api.Controllers;
+
+/// <summary>
+/// 认证控制器
+/// </summary>
+[AllowAnonymous]
+public class AuthController : BaseApiController
+{
+    private readonly ICurrentUser _currentUser;
+    private readonly IHttpContextAccessor _httpContextAccessor;
+
+    public AuthController(ICurrentUser currentUser, IHttpContextAccessor httpContextAccessor)
+    {
+        _currentUser = currentUser;
+        _httpContextAccessor = httpContextAccessor;
+    }
+
+    /// <summary>
+    /// 用户登录
+    /// </summary>
+    /// <param name="request">登录请求</param>
+    /// <returns>登录响应</returns>
+    [HttpPost("login")]
+    [ProducesResponseType(typeof(ApiResponse<LoginResponseDto>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 400)]
+    public async Task<ActionResult<ApiResponse<LoginResponseDto>>> Login([FromBody] LoginDto request)
+    {
+        var ipAddress = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
+        var userAgent = _httpContextAccessor.HttpContext?.Request.Headers["User-Agent"].ToString();
+
+        var command = new LoginCommand
+        {
+            Data = request,
+            IpAddress = ipAddress,
+            UserAgent = userAgent
+        };
+
+        var result = await Mediator.Send(command);
+        return Success(result, "登录成功");
+    }
+
+    /// <summary>
+    /// 刷新Token
+    /// </summary>
+    /// <param name="request">刷新Token请求</param>
+    /// <returns>新的Token</returns>
+    [HttpPost("refresh")]
+    [ProducesResponseType(typeof(ApiResponse<LoginResponseDto>), 200)]
+    public async Task<ActionResult<ApiResponse<LoginResponseDto>>> RefreshToken([FromBody] RefreshTokenRequest request)
+    {
+        var ipAddress = _httpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
+
+        var command = new RefreshTokenCommand
+        {
+            RefreshToken = request.RefreshToken,
+            IpAddress = ipAddress
+        };
+
+        var result = await Mediator.Send(command);
+        return Success(result, "Token刷新成功");
+    }
+
+    /// <summary>
+    /// 用户登出
+    /// </summary>
+    [HttpPost("logout")]
+    [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<object>), 200)]
+    public async Task<ActionResult<ApiResponse<object>>> Logout([FromBody] LogoutRequest? request)
+    {
+        var command = new LogoutCommand
+        {
+            UserId = _currentUser.Id,
+            RefreshToken = request?.RefreshToken ?? string.Empty
+        };
+
+        await Mediator.Send(command);
+        return Success("登出成功");
+    }
+
+    /// <summary>
+    /// 获取当前用户信息
+    /// </summary>
+    [HttpGet("current-user")]
+    [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<CurrentUserDto>), 200)]
+    public async Task<ActionResult<ApiResponse<CurrentUserDto>>> GetCurrentUser()
+    {
+        var user = new CurrentUserDto
+        {
+            Id = _currentUser.Id,
+            Username = _currentUser.UserName ?? string.Empty,
+            Nickname = _currentUser.Name,
+            Email = _currentUser.Email,
+            Phone = _currentUser.Phone,
+            OrgId = _currentUser.OrgId,
+            Permissions = _currentUser.GetPermissions()
+        };
+
+        // 获取用户菜单
+        var menus = await Mediator.Send(new GetUserMenusQuery { UserId = _currentUser.Id });
+        user.Menus = menus;
+
+        return Success(user, "获取成功");
+    }
+
+    /// <summary>
+    /// 获取用户菜单
+    /// </summary>
+    [HttpGet("menus")]
+    [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<List<MenuTreeDto>>), 200)]
+    public async Task<ActionResult<ApiResponse<List<MenuTreeDto>>>> GetMenus()
+    {
+        var result = await Mediator.Send(new GetUserMenusQuery { UserId = _currentUser.Id });
+        return Success(result, "获取成功");
+    }
+
+    /// <summary>
+    /// 获取用户权限
+    /// </summary>
+    [HttpGet("permissions")]
+    [Authorize]
+    [ProducesResponseType(typeof(ApiResponse<List<string>>), 200)]
+    public IActionResult GetPermissions()
+    {
+        var permissions = _currentUser.GetPermissions();
+        return Success(permissions, "获取成功");
+    }
+}
+
+/// <summary>
+/// 刷新Token请求
+/// </summary>
+public class RefreshTokenRequest
+{
+    public string RefreshToken { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 登出请求
+/// </summary>
+public class LogoutRequest
+{
+    public string? RefreshToken { get; set; }
+}
+
+/// <summary>
+/// 当前用户信息
+/// </summary>
+public class CurrentUserDto
+{
+    public long Id { get; set; }
+    public string Username { get; set; } = string.Empty;
+    public string? Nickname { get; set; }
+    public string? Email { get; set; }
+    public string? Phone { get; set; }
+    public long OrgId { get; set; }
+    public List<string> Permissions { get; set; } = new();
+    public List<MenuTreeDto> Menus { get; set; } = new();
+}
+```
+
+### 4. Controllers/UsersController.cs
+
+```csharp
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Fountain.Service.Identity.Application.Commands.Users;
+using Fountain.Service.Identity.Application.DTOs.Common;
+using Fountain.Service.Identity.Application.DTOs.Users;
+using Fountain.Service.Identity.Application.Queries.Users;
+using Fountain.Service.Identity.Application.Common.Interfaces;
+
+namespace Fountain.Service.Identity.Api.Controllers;
+
+/// <summary>
+/// 用户管理控制器
+/// </summary>
+[Authorize]
+public class UsersController : BaseApiController
+{
+    private readonly ICurrentUser _currentUser;
+
+    public UsersController(ICurrentUser currentUser)
+    {
+        _currentUser = currentUser;
+    }
+
+    /// <summary>
+    /// 获取用户列表
+    /// </summary>
+    [HttpGet]
+    [ProducesResponseType(typeof(ApiResponse<PaginatedResult<UserListDto>>), 200)]
+    public async Task<ActionResult<ApiResponse<PaginatedResult<UserListDto>>>> GetList(
+        [FromQuery] int pageIndex = 1,
+        [FromQuery] int pageSize = 20,
+        [FromQuery] string? keyword = null,
+        [FromQuery] long? orgId = null,
+        [FromQuery] string? status = null)
+    {
+        var query = new GetUserListQuery
+        {
+            PageIndex = pageIndex,
+            PageSize = pageSize,
+            Keyword = keyword,
+            OrgId = orgId,
+            Status = status
+        };
+
+        var result = await Mediator.Send(query);
+        return Success(result, "获取成功");
+    }
+
+    /// <summary>
+    /// 根据ID获取用户
+    /// </summary>
+    [HttpGet("{id}")]
+    [ProducesResponseType(typeof(ApiResponse<UserDto>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 404)]
+    public async Task<ActionResult<ApiResponse<UserDto>>> GetById(long id)
+    {
+        var query = new GetUserByIdQuery { Id = id };
+        var result = await Mediator.Send(query);
+
+        if (result == null)
+            return NotFoundResponse($"用户 {id} 不存在");
+
+        return Success(result, "获取成功");
+    }
+
+    /// <summary>
+    /// 创建用户
+    /// </summary>
+    [HttpPost]
+    [ProducesResponseType(typeof(ApiResponse<UserDto>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 400)]
+    public async Task<ActionResult<ApiResponse<UserDto>>> Create([FromBody] CreateUserDto dto)
+    {
+        var command = new CreateUserCommand { Data = dto };
+        var result = await Mediator.Send(command);
+        return Success(result, "创建成功");
+    }
+
+    /// <summary>
+    /// 更新用户
+    /// </summary>
+    [HttpPut("{id}")]
+    [ProducesResponseType(typeof(ApiResponse<UserDto>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 400)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 404)]
+    public async Task<ActionResult<ApiResponse<UserDto>>> Update(long id, [FromBody] UpdateUserDto dto)
+    {
+        var command = new UpdateUserCommand { Id = id, Data = dto };
+        var result = await Mediator.Send(command);
+
+        if (result == null)
+            return NotFoundResponse($"用户 {id} 不存在");
+
+        return Success(result, "更新成功");
+    }
+
+    /// <summary>
+    /// 删除用户
+    /// </summary>
+    [HttpDelete("{id}")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 404)]
+    public async Task<ActionResult<ApiResponse<bool>>> Delete(long id)
+    {
+        var command = new DeleteUserCommand { Id = id };
+        var result = await Mediator.Send(command);
+        return Success(result, "删除成功");
+    }
+
+    /// <summary>
+    /// 修改密码
+    /// </summary>
+    [HttpPost("{id}/change-password")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), 200)]
+    [ProducesResponseType(typeof(ApiResponse<object>), 400)]
+    public async Task<ActionResult<ApiResponse<bool>>> ChangePassword(long id, [FromBody] ChangePasswordDto dto)
+    {
+        // 检查权限：只能修改自己的密码或有管理权限
+        if (id != _currentUser.Id && !_currentUser.HasPermission("user:password:reset"))
+        {
+            return ForbiddenResponse("无权限修改其他用户密码");
+        }
+
+        var command = new ChangePasswordCommand
+        {
+            UserId = id,
+            OldPassword = dto.OldPassword,
+            NewPassword = dto.NewPassword
+        };
+
+        var result = await Mediator.Send(command);
+        return Success(result, "密码修改成功");
+    }
+
+    /// <summary>
+    /// 重置密码（管理员）
+    /// </summary>
+    [HttpPost("{id}/reset-password")]
+    [Authorize(Policy = "Permission:user:password:reset")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), 200)]
+    public async Task<ActionResult<ApiResponse<bool>>> ResetPassword(long id, [FromBody] ResetPasswordDto dto)
+    {
+        var command = new ResetPasswordCommand { UserId = id, NewPassword = dto.NewPassword };
+        var result = await Mediator.Send(command);
+        return Success(result, "密码重置成功");
+    }
+
+    /// <summary>
+    /// 分配角色
+    /// </summary>
+    [HttpPost("{id}/roles")]
+    [Authorize(Policy = "Permission:user:role:assign")]
+    [ProducesResponseType(typeof(ApiResponse<bool>), 200)]
+    public async Task<ActionResult<ApiResponse<bool>>> AssignRoles(long id, [FromBody] AssignRolesDto dto)
+    {
+        var command = new AssignRolesCommand { UserId = id, RoleIds = dto.RoleIds };
+        var result = await Mediator.Send(command);
+        return Success(result, "角色分配成功");
+    }
+}
+
+/// <summary>
+/// 修改密码DTO
+/// </summary>
+public class ChangePasswordDto
+{
+    public string OldPassword { get; set; } = string.Empty;
+    public string NewPassword { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 重置密码DTO
+/// </summary>
+public class ResetPasswordDto
+{
+    public string NewPassword { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 分配角色DTO
+/// </summary>
+public class AssignRolesDto
+{
+    public List<long> RoleIds { get; set; } = new();
+}
+```
+
+### 5. Filters/GlobalExceptionFilter.cs
+
+```csharp
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Fountain.Service.Identity.Application.DTOs.Common;
+using Fountain.Service.Identity.Domain.Exceptions;
+
+namespace Fountain.Service.Identity.Api.Filters;
+
+/// <summary>
+/// 全局异常过滤器
+/// </summary>
+public class GlobalExceptionFilter : IExceptionFilter
+{
+    private readonly ILogger<GlobalExceptionFilter> _logger;
+
+    public GlobalExceptionFilter(ILogger<GlobalExceptionFilter> logger)
+    {
+        _logger = logger;
+    }
+
+    public void OnException(ExceptionContext context)
+    {
+        var exception = context.Exception;
+        var response = ApiResponse<object>.Fail("服务器内部错误", "INTERNAL_ERROR");
+
+        switch (exception)
+        {
+            case IdentityDomainException domainEx:
+                response = ApiResponse<object>.Fail(domainEx.Message, domainEx.Code);
+                context.Result = new BadRequestObjectResult(response);
+                break;
+
+            case UnauthorizedAccessException:
+                response = ApiResponse<object>.Fail(exception.Message, "UNAUTHORIZED");
+                context.Result = new UnauthorizedObjectResult(response);
+                break;
+
+            case InvalidOperationException:
+                response = ApiResponse<object>.Fail(exception.Message, "INVALID_OPERATION");
+                context.Result = new BadRequestObjectResult(response);
+                break;
+
+            case ArgumentException:
+            case ArgumentNullException:
+                response = ApiResponse<object>.Fail(exception.Message, "INVALID_ARGUMENT");
+                context.Result = new BadRequestObjectResult(response);
+                break;
+
+            default:
+                _logger.LogError(exception, "未处理的异常: {Message}", exception.Message);
+                context.Result = new ObjectResult(response) { StatusCode = 500 };
+                break;
+        }
+
+        context.ExceptionHandled = true;
+    }
+}
+```
+
+### 6. Filters/ApiResultFilter.cs
+
+```csharp
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Fountain.Service.Identity.Application.DTOs.Common;
+
+namespace Fountain.Service.Identity.Api.Filters;
+
+/// <summary>
+/// API 结果包装过滤器
+/// 统一包装响应格式
+/// </summary>
+public class ApiResultFilter : IActionFilter
+{
+    public void OnActionExecuting(ActionExecutingContext context)
+    {
+    }
+
+    public void OnActionExecuted(ActionExecutedContext context)
+    {
+        if (context.Result == null)
+            return;
+
+        // 如果已经是 ApiResponse 格式，不再包装
+        if (context.Result is ObjectResult objectResult && objectResult.Value is ApiResponse<object>)
+            return;
+
+        // 如果已经是 FileResult 或其他特殊结果，不包装
+        if (context.Result is FileResult || context.Result is StatusCodeResult)
+            return;
+
+        // 包装成功响应
+        if (context.Result is ObjectResult successResult)
+        {
+            var wrappedResult = ApiResponse<object>.Ok(successResult.Value, "操作成功");
+            context.Result = new ObjectResult(wrappedResult)
+            {
+                StatusCode = successResult.StatusCode ?? 200
+            };
+        }
+        else if (context.Result is JsonResult jsonResult)
+        {
+            var wrappedResult = ApiResponse<object>.Ok(jsonResult.Value, "操作成功");
+            context.Result = new ObjectResult(wrappedResult)
+            {
+                StatusCode = 200
+            };
+        }
+        else if (context.Result is ContentResult contentResult)
+        {
+            var wrappedResult = ApiResponse<object>.Ok(contentResult.Content, "操作成功");
+            context.Result = new ObjectResult(wrappedResult)
+            {
+                StatusCode = contentResult.StatusCode ?? 200
+            };
+        }
+    }
+}
+```
+
+### 7. Middleware/RequestLoggingMiddleware.cs
+
+```csharp
+using System.Diagnostics;
+using System.Text;
+
+namespace Fountain.Service.Identity.Api.Middleware;
+
+/// <summary>
+/// 请求日志中间件
+/// </summary>
+public class RequestLoggingMiddleware
+{
+    private readonly RequestDelegate _next;
+    private readonly ILogger<RequestLoggingMiddleware> _logger;
+
+    public RequestLoggingMiddleware(RequestDelegate next, ILogger<RequestLoggingMiddleware> logger)
+    {
+        _next = next;
+        _logger = logger;
+    }
+
+    public async Task InvokeAsync(HttpContext context)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var request = context.Request;
+
+        // 记录请求信息
+        var requestInfo = new
+        {
+            Method = request.Method,
+            Path = request.Path,
+            QueryString = request.QueryString.ToString(),
+            IP = context.Connection.RemoteIpAddress?.ToString(),
+            UserAgent = request.Headers["User-Agent"].ToString()
+        };
+
+        _logger.LogInformation("请求开始: {@RequestInfo}", requestInfo);
+
+        // 捕获响应体
+        var originalBodyStream = context.Response.Body;
+        using var responseBody = new MemoryStream();
+        context.Response.Body = responseBody;
+
+        try
+        {
+            await _next(context);
+            stopwatch.Stop();
+
+            // 记录响应信息
+            context.Response.Body.Seek(0, SeekOrigin.Begin);
+            var responseText = await new StreamReader(context.Response.Body).ReadToEndAsync();
+            context.Response.Body.Seek(0, SeekOrigin.Begin);
+
+            var responseInfo = new
+            {
+                StatusCode = context.Response.StatusCode,
+                Duration = stopwatch.ElapsedMilliseconds,
+                Body = responseText.Length > 1000 ? responseText[..1000] + "..." : responseText
+            };
+
+            _logger.LogInformation("请求完成: {@ResponseInfo}", responseInfo);
+
+            await responseBody.CopyToAsync(originalBodyStream);
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            _logger.LogError(ex, "请求异常: {Path}, 耗时: {Duration}ms", request.Path, stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+        finally
+        {
+            context.Response.Body = originalBodyStream;
+        }
+    }
+}
+```
+
+### 8. Middleware/CorrelationIdMiddleware.cs
+
+```csharp
+namespace Fountain.Service.Identity.Api.Middleware;
+
+/// <summary>
+/// 关联ID中间件
+/// </summary>
+public class CorrelationIdMiddleware
+{
+    private readonly RequestDelegate _next;
+    private readonly ILogger<CorrelationIdMiddleware> _logger;
+
+    public CorrelationIdMiddleware(RequestDelegate next, ILogger<CorrelationIdMiddleware> logger)
+    {
+        _next = next;
+        _logger = logger;
+    }
+
+    public async Task InvokeAsync(HttpContext context)
+    {
+        var correlationId = context.Request.Headers["X-Correlation-Id"].FirstOrDefault()
+                            ?? Guid.NewGuid().ToString();
+
+        context.TraceIdentifier = correlationId;
+        context.Response.Headers["X-Correlation-Id"] = correlationId;
+
+        using (_logger.BeginScope(new Dictionary<string, object>
+        {
+            ["CorrelationId"] = correlationId
+        }))
+        {
+            await _next(context);
+        }
+    }
+}
+```
+
+### 9. Extensions/AuthenticationExtensions.cs
+
+```csharp
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using Fountain.Framework.Core.Jwt;
+
+namespace Fountain.Service.Identity.Api.Extensions;
+
+/// <summary>
+/// 认证扩展
+/// </summary>
+public static class AuthenticationExtensions
+{
+    public static IServiceCollection AddJwtAuthentication(this IServiceCollection services, IConfiguration configuration)
+    {
+        var jwtOptions = configuration.GetSection("Jwt").Get<JwtOptions>();
+        
+        if (jwtOptions == null)
+            throw new InvalidOperationException("JWT 配置未找到");
+
+        services.Configure<JwtOptions>(configuration.GetSection("Jwt"));
+
+        services.AddAuthentication(options =>
+        {
+            options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+            options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+        })
+        .AddJwtBearer(options =>
+        {
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuerSigningKey = true,
+                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtOptions.Secret)),
+                ValidateIssuer = true,
+                ValidIssuer = jwtOptions.Issuer,
+                ValidateAudience = true,
+                ValidAudience = jwtOptions.Audience,
+                ValidateLifetime = true,
+                ClockSkew = TimeSpan.Zero
+            };
+
+            options.Events = new JwtBearerEvents
+            {
+                OnMessageReceived = context =>
+                {
+                    // 从请求头或查询字符串获取 Token
+                    var token = context.Request.Headers["Authorization"].FirstOrDefault();
+                    if (string.IsNullOrEmpty(token) && context.Request.Query.ContainsKey("access_token"))
+                    {
+                        token = context.Request.Query["access_token"];
+                    }
+                    
+                    context.Token = token?.Replace("Bearer ", string.Empty);
+                    return Task.CompletedTask;
+                },
+                OnAuthenticationFailed = context =>
+                {
+                    var logger = context.HttpContext.RequestServices.GetRequiredService<ILogger<JwtBearerEvents>>();
+                    logger.LogWarning(context.Exception, "JWT 认证失败");
+                    return Task.CompletedTask;
+                }
+            };
+        });
+
+        return services;
+    }
+
+    public static IServiceCollection AddAuthorizationPolicies(this IServiceCollection services)
+    {
+        services.AddAuthorization(options =>
+        {
+            // 添加基于权限的策略
+            options.AddPolicy("Permission:user:create", policy => 
+                policy.RequireAssertion(context =>
+                    context.User.HasClaim("permissions", "user:create") ||
+                    context.User.HasClaim("permissions", "admin:all")));
+
+            options.AddPolicy("Permission:user:update", policy => 
+                policy.RequireAssertion(context =>
+                    context.User.HasClaim("permissions", "user:update") ||
+                    context.User.HasClaim("permissions", "admin:all")));
+
+            options.AddPolicy("Permission:user:delete", policy => 
+                policy.RequireAssertion(context =>
+                    context.User.HasClaim("permissions", "user:delete") ||
+                    context.User.HasClaim("permissions", "admin:all")));
+
+            options.AddPolicy("Permission:user:password:reset", policy => 
+                policy.RequireAssertion(context =>
+                    context.User.HasClaim("permissions", "user:password:reset") ||
+                    context.User.HasClaim("permissions", "admin:all")));
+
+            options.AddPolicy("Permission:user:role:assign", policy => 
+                policy.RequireAssertion(context =>
+                    context.User.HasClaim("permissions", "user:role:assign") ||
+                    context.User.HasClaim("permissions", "admin:all")));
+
+            options.AddPolicy("Permission:role:manage", policy => 
+                policy.RequireAssertion(context =>
+                    context.User.HasClaim("permissions", "role:manage") ||
+                    context.User.HasClaim("permissions", "admin:all")));
+
+            options.AddPolicy("Permission:menu:manage", policy => 
+                policy.RequireAssertion(context =>
+                    context.User.HasClaim("permissions", "menu:manage") ||
+                    context.User.HasClaim("permissions", "admin:all")));
+
+            options.AddPolicy("Permission:org:manage", policy => 
+                policy.RequireAssertion(context =>
+                    context.User.HasClaim("permissions", "org:manage") ||
+                    context.User.HasClaim("permissions", "admin:all")));
+        });
+
+        return services;
+    }
+}
+```
+
+### 10. Extensions/SwaggerExtensions.cs
+
+```csharp
+using Microsoft.OpenApi.Models;
+
+namespace Fountain.Service.Identity.Api.Extensions;
+
+/// <summary>
+/// Swagger 扩展
+/// </summary>
+public static class SwaggerExtensions
+{
+    public static IServiceCollection AddSwaggerDocumentation(this IServiceCollection services)
+    {
+        services.AddEndpointsApiExplorer();
+        services.AddSwaggerGen(c =>
+        {
+            c.SwaggerDoc("v1", new OpenApiInfo
+            {
+                Title = "Fountain Identity Service API",
+                Version = "v1",
+                Description = "身份认证与授权服务 API",
+                Contact = new OpenApiContact
+                {
+                    Name = "Fountain Team",
+                    Email = "support@fountain.com"
+                }
+            });
+
+            // 添加 JWT 认证
+            c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+            {
+                Description = "JWT Authorization header using the Bearer scheme. Enter 'Bearer {token}'",
+                Name = "Authorization",
+                In = ParameterLocation.Header,
+                Type = SecuritySchemeType.ApiKey,
+                Scheme = "Bearer"
+            });
+
+            c.AddSecurityRequirement(new OpenApiSecurityRequirement
+            {
+                {
+                    new OpenApiSecurityScheme
+                    {
+                        Reference = new OpenApiReference
+                        {
+                            Type = ReferenceType.SecurityScheme,
+                            Id = "Bearer"
+                        }
+                    },
+                    Array.Empty<string>()
+                }
+            });
+
+            // 显示枚举值描述
+            c.UseInlineDefinitionsForEnums();
+
+            // 包含 XML 注释
+            var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
+            var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
+            if (File.Exists(xmlPath))
+            {
+                c.IncludeXmlComments(xmlPath);
+            }
+        });
+
+        return services;
+    }
+
+    public static IApplicationBuilder UseSwaggerDocumentation(this IApplicationBuilder app)
+    {
+        app.UseSwagger();
+        app.UseSwaggerUI(c =>
+        {
+            c.SwaggerEndpoint("/swagger/v1/swagger.json", "Identity Service API v1");
+            c.RoutePrefix = "swagger";
+            c.DocExpansion(Swashbuckle.AspNetCore.SwaggerUI.DocExpansion.List);
+        });
+
+        return app;
+    }
+}
+```
+
+### 11. appsettings.json
+
+```json
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "Serilog": {
+    "MinimumLevel": {
+      "Default": "Information",
+      "Override": {
+        "Microsoft": "Warning",
+        "System": "Warning"
+      }
+    }
+  },
+  "ConnectionStrings": {
+    "Identity": "Server=localhost;Database=Fountain_Identity;Trusted_Connection=True;TrustServerCertificate=True;"
+  },
+  "Jwt": {
+    "Secret": "your-super-secret-key-with-at-least-32-characters-here",
+    "Issuer": "Fountain.Identity",
+    "Audience": "Fountain.API",
+    "AccessTokenExpireMinutes": 30,
+    "RefreshTokenExpireDays": 7
+  },
+  "AllowedHosts": "*"
+}
+```
+
+### 12. Fountain.Service.Identity.Api.csproj
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Tools" Version="8.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Serilog.AspNetCore" Version="8.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="5.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="5.0.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.5.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Fountain.Service.Identity.Application\Fountain.Service.Identity.Application.csproj" />
+    <ProjectReference Include="..\Fountain.Service.Identity.Infrastructure\Fountain.Service.Identity.Infrastructure.csproj" />
+  </ItemGroup>
+
+</Project>
+```
+
+## 四、架构层次总结
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    Fountain.Service.Identity.Api                │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  Controllers     - 接收 HTTP 请求，返回响应              │   │
+│  │  Filters         - 异常处理、响应包装                    │   │
+│  │  Middleware      - 日志、关联ID、认证                    │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                              │ 调用
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                 Fountain.Service.Identity.Application           │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  Commands/Queries  - 业务用例定义                       │   │
+│  │  Handlers          - 业务用例编排                       │   │
+│  │  DTOs              - 数据传输对象                       │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                              │ 调用
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                  Fountain.Service.Identity.Domain               │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  Entities         - 业务实体（User, Role, Menu）        │   │
+│  │  ValueObjects     - 值对象（Email, Password）           │   │
+│  │  Repositories     - 仓储接口                            │   │
+│  │  Services         - 领域服务接口                        │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                              │ 实现
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│               Fountain.Service.Identity.Infrastructure          │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  Repositories     - 仓储实现（EF Core）                 │   │
+│  │  Services         - 领域服务实现                        │   │
+│  │  Configurations   - EF 配置                             │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## 五、各层职责总结
+
+| 层级 | 职责 | 依赖 |
+|------|------|------|
+| **API** | HTTP 入口、认证、响应格式化、异常处理 | Application |
+| **Application** | 用例编排、DTO 转换、权限检查 | Domain |
+| **Domain** | 业务规则、实体、值对象、接口定义 | 无 |
+| **Infrastructure** | 数据持久化、技术实现 | Domain |

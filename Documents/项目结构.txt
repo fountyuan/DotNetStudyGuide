@@ -1,0 +1,836 @@
+基于 WMS（仓库管理系统）的业务特点，我来设计一个完整的分层项目结构。
+
+WMS 项目整体架构
+text
+WMS.sln
+├── 01-Framework/                          # 框架层
+├── 02-BuildingBlocks/                     # 构建块（共享组件）
+├── 03-Services/                           # 业务服务层
+├── 04-WebAPI/                             # API 网关
+└── 05-Tests/                              # 测试项目
+详细项目结构
+01-Framework（框架层）
+text
+01-Framework/
+├── WMS.Framework.Core/                    # 核心框架
+│   ├── Abstracts/                         # 抽象定义
+│   │   ├── IUnitOfWork.cs
+│   │   ├── IRepository.cs
+│   │   └── IQueryRepository.cs
+│   ├── Attributes/                        # 特性
+│   │   ├── EntityAttribute.cs
+│   │   ├── ColumnAttribute.cs
+│   │   └── NavigationAttribute.cs
+│   ├── Helpers/                           # 帮助类
+│   │   ├── DateTimeHelper.cs
+│   │   ├── StringHelper.cs
+│   │   └── ExpressionHelper.cs
+│   └── Extensions/                        # 扩展方法
+│       ├── QueryableExtensions.cs
+│       └── StringExtensions.cs
+│
+├── WMS.Framework.Data/                    # 数据访问层
+│   ├── Context/                           # DbContext
+│   │   ├── WMSDbContext.cs
+│   │   ├── ReadOnlyWMSDbContext.cs
+│   │   └── DesignTimeDbContextFactory.cs
+│   ├── Interceptors/                      # 拦截器
+│   │   ├── AuditableEntityInterceptor.cs
+│   │   ├── SoftDeleteInterceptor.cs
+│   │   └── ConcurrencyInterceptor.cs
+│   ├── Repositories/                      # 仓储实现
+│   │   ├── Repository.cs
+│   │   ├── QueryRepository.cs
+│   │   └── UnitOfWork.cs
+│   ├── Converters/                        # 值转换器
+│   │   ├── DateTimeConverter.cs
+│   │   ├── EnumConverter.cs
+│   │   └── JsonConverter.cs
+│   └── Configurations/                    # 实体配置
+│       ├── BaseEntityConfiguration.cs
+│       └── IEntityTypeConfiguration.cs
+│
+└── WMS.Framework.Caching/                 # 缓存抽象
+    ├── ICacheService.cs
+    ├── RedisCacheService.cs
+    └── MemoryCacheService.cs
+02-BuildingBlocks（构建块）
+text
+02-BuildingBlocks/
+├── WMS.BuildingBlocks.Domain/             # 领域层核心
+│   ├── Common/                            # 公共领域
+│   │   ├── BaseEntity.cs
+│   │   ├── ValueObject.cs
+│   │   ├── IAggregateRoot.cs
+│   │   └── IDomainEvent.cs
+│   ├── Specifications/                    # 规约模式
+│   │   ├── Specification.cs
+│   │   ├── AndSpecification.cs
+│   │   └── OrSpecification.cs
+│   └── Exceptions/                        # 领域异常
+│       ├── DomainException.cs
+│       └── BusinessRuleException.cs
+│
+└── WMS.BuildingBlocks.Application/        # 应用层核心
+    ├── Common/
+    │   ├── ICurrentUserContext.cs
+    │   ├── IRequestHandler.cs
+    │   └── Result.cs
+    ├── DTOs/                              # 通用 DTO
+    │   ├── PagedResult.cs
+    │   ├── ApiResponse.cs
+    │   └── ErrorResponse.cs
+    ├── Mappings/                          # 映射配置
+    │   └── IMapFrom.cs
+    └── Validators/                        # 验证器
+        └── BaseValidator.cs
+03-Services（业务服务层）
+text
+03-Services/
+├── WMS.Services.Inventory/                # 库存管理模块
+│   ├── Domain/                            # 领域层
+│   │   ├── Entities/
+│   │   │   ├── Warehouse.cs               # 仓库
+│   │   │   ├── Location.cs                # 库位
+│   │   │   ├── Product.cs                 # 产品
+│   │   │   ├── Stock.cs                   # 库存
+│   │   │   └── InventoryTransaction.cs    # 库存交易
+│   │   ├── ValueObjects/
+│   │   │   ├── Quantity.cs                # 数量（值对象）
+│   │   │   ├── LocationCode.cs            # 库位编码
+│   │   │   └── BatchNumber.cs             # 批次号
+│   │   ├── Interfaces/
+│   │   │   ├── IInventoryRepository.cs
+│   │   │   └── IStockService.cs
+│   │   ├── Events/
+│   │   │   ├── StockChangedEvent.cs
+│   │   │   └── StockAlertEvent.cs
+│   │   └── Specifications/
+│   │       ├── LowStockSpecification.cs
+│   │       └── ExpiredStockSpecification.cs
+│   │
+│   ├── Application/                       # 应用层
+│   │   ├── Commands/
+│   │   │   ├── CreateWarehouse/
+│   │   │   │   ├── CreateWarehouseCommand.cs
+│   │   │   │   ├── CreateWarehouseHandler.cs
+│   │   │   │   └── CreateWarehouseValidator.cs
+│   │   │   ├── AdjustStock/
+│   │   │   │   ├── AdjustStockCommand.cs
+│   │   │   │   ├── AdjustStockHandler.cs
+│   │   │   │   └── AdjustStockValidator.cs
+│   │   │   └── TransferStock/
+│   │   │       ├── TransferStockCommand.cs
+│   │   │       └── TransferStockHandler.cs
+│   │   ├── Queries/
+│   │   │   ├── GetStock/
+│   │   │   │   ├── GetStockQuery.cs
+│   │   │   │   └── GetStockHandler.cs
+│   │   │   └── GetInventoryTransactions/
+│   │   │       ├── GetInventoryTransactionsQuery.cs
+│   │   │       └── GetInventoryTransactionsHandler.cs
+│   │   ├── DTOs/
+│   │   │   ├── WarehouseDto.cs
+│   │   │   ├── StockDto.cs
+│   │   │   └── InventoryTransactionDto.cs
+│   │   └── Mappings/
+│   │       └── InventoryMappingProfile.cs
+│   │
+│   ├── Infrastructure/                    # 基础设施层
+│   │   ├── Persistence/
+│   │   │   ├── Configurations/
+│   │   │   │   ├── WarehouseConfiguration.cs
+│   │   │   │   ├── StockConfiguration.cs
+│   │   │   │   └── InventoryTransactionConfiguration.cs
+│   │   │   ├── Repositories/
+│   │   │   │   ├── InventoryRepository.cs
+│   │   │   │   └── StockRepository.cs
+│   │   │   └── Migrations/
+│   │   │       └── InventoryDbContext.cs
+│   │   └── Services/
+│   │       ├── StockService.cs
+│   │       └── InventoryAlertService.cs
+│   │
+│   └── API/                               # API 层（可选，独立部署）
+│       ├── Controllers/
+│       │   ├── WarehouseController.cs
+│       │   ├── StockController.cs
+│       │   └── InventoryTransactionController.cs
+│       └── Program.cs
+│
+├── WMS.Services.Order/                    # 订单管理模块
+│   ├── Domain/
+│   │   ├── Entities/
+│   │   │   ├── Order.cs
+│   │   │   ├── OrderItem.cs
+│   │   │   ├── OrderStatus.cs
+│   │   │   └── Shipment.cs
+│   │   ├── ValueObjects/
+│   │   │   ├── OrderNumber.cs
+│   │   │   └── Address.cs
+│   │   └── Interfaces/
+│   │       └── IOrderRepository.cs
+│   ├── Application/
+│   │   ├── Commands/
+│   │   │   ├── CreateOrder/
+│   │   │   │   ├── CreateOrderCommand.cs
+│   │   │   │   └── CreateOrderHandler.cs
+│   │   │   └── UpdateOrderStatus/
+│   │   │       └── UpdateOrderStatusCommand.cs
+│   │   └── Queries/
+│   │       └── GetOrder/
+│   │           └── GetOrderQuery.cs
+│   ├── Infrastructure/
+│   │   ├── Persistence/
+│   │   └── Repositories/
+│   └── API/
+│
+├── WMS.Services.Purchase/                 # 采购管理模块
+│   ├── Domain/
+│   ├── Application/
+│   ├── Infrastructure/
+│   └── API/
+│
+├── WMS.Services.Sales/                    # 销售管理模块
+│   ├── Domain/
+│   ├── Application/
+│   ├── Infrastructure/
+│   └── API/
+│
+└── WMS.Services.Report/                   # 报表管理模块
+    ├── Domain/
+    ├── Application/
+    ├── Infrastructure/
+    └── API/
+04-WebAPI（API 网关）
+text
+04-WebAPI/
+├── WMS.WebAPI/                            # 主 API 网关
+│   ├── Controllers/
+│   │   ├── v1/
+│   │   │   ├── Inventory/
+│   │   │   │   ├── WarehouseController.cs
+│   │   │   │   ├── StockController.cs
+│   │   │   │   └── TransactionController.cs
+│   │   │   ├── Order/
+│   │   │   │   ├── OrderController.cs
+│   │   │   │   └── ShipmentController.cs
+│   │   │   └── Report/
+│   │   │       └── ReportController.cs
+│   │   └── v2/
+│   │       └── (未来版本)
+│   ├── Middleware/
+│   │   ├── ExceptionHandlingMiddleware.cs
+│   │   ├── RequestLoggingMiddleware.cs
+│   │   └── PerformanceMiddleware.cs
+│   ├── Filters/
+│   │   ├── ApiKeyAuthFilter.cs
+│   │   ├── ValidateModelFilter.cs
+│   │   └── RateLimitFilter.cs
+│   ├── Authentication/
+│   │   ├── JwtAuthenticationHandler.cs
+│   │   └── ApiKeyAuthenticationHandler.cs
+│   ├── Swagger/
+│   │   ├── SwaggerConfiguration.cs
+│   │   └── SwaggerFilters.cs
+│   ├── Program.cs
+│   ├── appsettings.json
+│   └── appsettings.Development.json
+│
+└── WMS.WebAPI.Gateway/                   # API 网关（可选，使用 Ocelot）
+    ├── ocelot.json
+    ├── Program.cs
+    └── appsettings.json
+05-Tests（测试项目）
+text
+05-Tests/
+├── WMS.Tests.Unit/                        # 单元测试
+│   ├── Domain/
+│   │   ├── Inventory/
+│   │   │   ├── WarehouseTests.cs
+│   │   │   └── StockTests.cs
+│   │   └── Order/
+│   │       └── OrderTests.cs
+│   ├── Application/
+│   │   ├── CreateWarehouseHandlerTests.cs
+│   │   └── AdjustStockHandlerTests.cs
+│   └── Common/
+│       └── TestBase.cs
+│
+├── WMS.Tests.Integration/                 # 集成测试
+│   ├── Controllers/
+│   │   ├── WarehouseControllerTests.cs
+│   │   └── StockControllerTests.cs
+│   ├── Repositories/
+│   │   └── InventoryRepositoryTests.cs
+│   └── TestFixtures/
+│       ├── DatabaseFixture.cs
+│       └── TestWebApplicationFactory.cs
+│
+└── WMS.Tests.Performance/                 # 性能测试
+    ├── LoadTests/
+    │   └── InventoryLoadTest.cs
+    └── StressTests/
+        └── StockStressTest.cs
+模块间的依赖关系
+text
+┌─────────────────────────────────────────────────────────────────┐
+│                        WMS.WebAPI                               │
+│                    (API 网关 / 入口点)                          │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                    WMS.Services.*                               │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐           │
+│  │  Inventory   │ │    Order     │ │   Purchase   │           │
+│  │   Service    │ │   Service    │ │   Service    │           │
+│  └──────────────┘ └──────────────┘ └──────────────┘           │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐           │
+│  │    Sales     │ │    Report    │ │      ...     │           │
+│  │   Service    │ │   Service    │ │              │           │
+│  └──────────────┘ └──────────────┘ └──────────────┘           │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                 WMS.BuildingBlocks.*                            │
+│  ┌──────────────────────┐  ┌──────────────────────┐           │
+│  │      Domain          │  │     Application      │           │
+│  │   (领域层核心)        │  │    (应用层核心)       │           │
+│  └──────────────────────┘  └──────────────────────┘           │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                     WMS.Framework.*                             │
+│  ┌──────────────────┐ ┌──────────────────┐ ┌─────────────────┐ │
+│  │     Core         │ │      Data        │ │    Caching      │ │
+│  │  (框架核心)       │ │   (数据访问)      │ │   (缓存)        │ │
+│  └──────────────────┘ └──────────────────┘ └─────────────────┘ │
+└─────────────────────────────────────────────────────────────────┘
+项目文件引用配置示例
+库存模块的 Infrastructure 层
+xml
+<!-- WMS.Services.Inventory.Infrastructure.csproj -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\WMS.Services.Inventory.Domain\WMS.Services.Inventory.Domain.csproj" />
+    <ProjectReference Include="..\WMS.Services.Inventory.Application\WMS.Services.Inventory.Application.csproj" />
+    <ProjectReference Include="..\..\..\02-BuildingBlocks\WMS.BuildingBlocks.Domain\WMS.BuildingBlocks.Domain.csproj" />
+    <ProjectReference Include="..\..\..\01-Framework\WMS.Framework.Data\WMS.Framework.Data.csproj" />
+    <ProjectReference Include="..\..\..\01-Framework\WMS.Framework.Caching\WMS.Framework.Caching.csproj" />
+  </ItemGroup>
+</Project>
+WebAPI 项目
+xml
+<!-- WMS.WebAPI.csproj -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\03-Services\WMS.Services.Inventory\WMS.Services.Inventory.API\WMS.Services.Inventory.API.csproj" />
+    <ProjectReference Include="..\03-Services\WMS.Services.Order\WMS.Services.Order.API\WMS.Services.Order.API.csproj" />
+    <ProjectReference Include="..\03-Services\WMS.Services.Purchase\WMS.Services.Purchase.API\WMS.Services.Purchase.API.csproj" />
+    <ProjectReference Include="..\03-Services\WMS.Services.Sales\WMS.Services.Sales.API\WMS.Services.Sales.API.csproj" />
+    <ProjectReference Include="..\03-Services\WMS.Services.Report\WMS.Services.Report.API\WMS.Services.Report.API.csproj" />
+  </ItemGroup>
+</Project>
+各模块职责说明
+模块	职责	核心实体
+Inventory	库存管理	Warehouse, Location, Product, Stock, InventoryTransaction
+Order	订单管理	Order, OrderItem, Shipment, OrderStatus
+Purchase	采购管理	PurchaseOrder, PurchaseOrderItem, Supplier
+Sales	销售管理	SalesOrder, SalesOrderItem, Customer
+Report	报表分析	InventoryReport, OrderReport, PerformanceReport
+数据库设计（多数据库/单数据库）
+方案一：分库（微服务架构）
+text
+WMS_Inventory_DB    # 库存数据库
+WMS_Order_DB        # 订单数据库
+WMS_Purchase_DB     # 采购数据库
+WMS_Sales_DB        # 销售数据库
+WMS_Report_DB       # 报表数据库（只读副本）
+方案二：单库（单体架构）
+text
+WMS_DB
+├── Inventory_*      # 库存表
+├── Order_*          # 订单表
+├── Purchase_*       # 采购表
+├── Sales_*          # 销售表
+└── Report_*         # 报表表
+部署架构
+text
+┌─────────────────────────────────────────────────────────────────┐
+│                        负载均衡器                                │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                    WMS.WebAPI (多实例)                          │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                      消息队列 (RabbitMQ)                         │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  StockChanged  |  OrderCreated  |  InventoryAlert      │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                    WMS.Services.* (多实例)                      │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐           │
+│  │  Inventory   │ │    Order     │ │   Purchase   │           │
+│  │   Service    │ │   Service    │ │   Service    │           │
+│  └──────────────┘ └──────────────┘ └──────────────┘           │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                        数据库集群                               │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  WMS_DB (主库)  |  WMS_DB (从库)  |  Redis (缓存)      │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+这种结构适合 WMS 系统的特点：
+
+✅ 模块化：每个业务模块独立
+
+✅ 可扩展：可以按模块独立部署和扩展
+
+✅ 可维护：代码职责清晰
+
+✅ 可测试：模块独立测试
+
+✅ 可复用：框架层和构建块被所有模块共享
+
+界面层呢
+您说得对！WMS 系统通常需要多个界面层来满足不同用户的需求。让我补充完整的界面层设计。
+
+完整的 WMS 项目结构（含界面层）
+text
+WMS.sln
+├── 00-Database/                           # 数据库项目
+├── 01-Framework/                          # 框架层
+├── 02-BuildingBlocks/                     # 构建块（共享组件）
+├── 03-Services/                           # 业务服务层
+├── 04-WebAPI/                             # API 网关
+├── 05-WebApp/                             # Web 应用（管理后台）
+├── 06-Desktop/                            # 桌面应用（仓库作业）
+├── 07-Mobile/                             # 移动应用（PDA/手持终端）
+├── 08-Reports/                            # 报表系统
+└── 09-Tests/                              # 测试项目
+详细界面层结构
+05-WebApp（Web 管理后台）
+text
+05-WebApp/
+├── WMS.AdminWeb/                          # 管理后台（React/Vue/Angular）
+│   ├── src/
+│   │   ├── pages/
+│   │   │   ├── Dashboard/                 # 仪表板
+│   │   │   │   ├── Dashboard.tsx
+│   │   │   │   └── components/
+│   │   │   ├── Inventory/                 # 库存管理
+│   │   │   │   ├── Warehouse/             # 仓库管理
+│   │   │   │   │   ├── WarehouseList.tsx
+│   │   │   │   │   ├── WarehouseForm.tsx
+│   │   │   │   │   └── WarehouseDetail.tsx
+│   │   │   │   ├── Location/              # 库位管理
+│   │   │   │   │   ├── LocationList.tsx
+│   │   │   │   │   └── LocationMap.tsx    # 库位图
+│   │   │   │   ├── Product/               # 产品管理
+│   │   │   │   │   ├── ProductList.tsx
+│   │   │   │   │   ├── ProductForm.tsx
+│   │   │   │   │   └── ProductDetail.tsx
+│   │   │   │   ├── Stock/                 # 库存查询
+│   │   │   │   │   ├── StockList.tsx
+│   │   │   │   │   ├── StockDetail.tsx
+│   │   │   │   │   └── StockAlert.tsx     # 库存预警
+│   │   │   │   └── Transaction/           # 库存交易
+│   │   │   │       ├── TransactionList.tsx
+│   │   │   │       └── TransactionDetail.tsx
+│   │   │   ├── Order/                     # 订单管理
+│   │   │   │   ├── Inbound/               # 入库订单
+│   │   │   │   │   ├── InboundOrderList.tsx
+│   │   │   │   │   ├── InboundOrderForm.tsx
+│   │   │   │   │   └── InboundOrderDetail.tsx
+│   │   │   │   ├── Outbound/              # 出库订单
+│   │   │   │   │   ├── OutboundOrderList.tsx
+│   │   │   │   │   ├── OutboundOrderForm.tsx
+│   │   │   │   │   └── OutboundOrderDetail.tsx
+│   │   │   │   └── Transfer/              # 调拨订单
+│   │   │   │       ├── TransferOrderList.tsx
+│   │   │   │       └── TransferOrderForm.tsx
+│   │   │   ├── Purchase/                  # 采购管理
+│   │   │   │   ├── Supplier/              # 供应商管理
+│   │   │   │   │   ├── SupplierList.tsx
+│   │   │   │   │   └── SupplierForm.tsx
+│   │   │   │   └── PurchaseOrder/         # 采购订单
+│   │   │   │       ├── PurchaseOrderList.tsx
+│   │   │   │       ├── PurchaseOrderForm.tsx
+│   │   │   │       └── PurchaseOrderDetail.tsx
+│   │   │   ├── Sales/                     # 销售管理
+│   │   │   │   ├── Customer/              # 客户管理
+│   │   │   │   │   ├── CustomerList.tsx
+│   │   │   │   │   └── CustomerForm.tsx
+│   │   │   │   └── SalesOrder/            # 销售订单
+│   │   │   │       ├── SalesOrderList.tsx
+│   │   │   │       ├── SalesOrderForm.tsx
+│   │   │   │       └── SalesOrderDetail.tsx
+│   │   │   ├── Warehouse/                 # 仓库作业
+│   │   │   │   ├── Receiving/             # 收货作业
+│   │   │   │   │   ├── ReceivingTask.tsx
+│   │   │   │   │   └── ReceivingList.tsx
+│   │   │   │   ├── Picking/               # 拣货作业
+│   │   │   │   │   ├── PickingTask.tsx
+│   │   │   │   │   ├── PickingList.tsx
+│   │   │   │   │   └── PickingWave.tsx    # 波次拣货
+│   │   │   │   ├── Packing/               # 打包作业
+│   │   │   │   │   ├── PackingTask.tsx
+│   │   │   │   │   └── PackingList.tsx
+│   │   │   │   └── Shipping/              # 发货作业
+│   │   │   │       ├── ShippingTask.tsx
+│   │   │   │       └── ShippingList.tsx
+│   │   │   ├── Report/                    # 报表管理
+│   │   │   │   ├── InventoryReport/       # 库存报表
+│   │   │   │   │   ├── InventorySummary.tsx
+│   │   │   │   │   └── InventoryDetail.tsx
+│   │   │   │   ├── OrderReport/           # 订单报表
+│   │   │   │   │   ├── OrderSummary.tsx
+│   │   │   │   │   └── OrderAnalysis.tsx
+│   │   │   │   ├── PerformanceReport/     # 绩效报表
+│   │   │   │   │   ├── EmployeeKPI.tsx
+│   │   │   │   │   └── WarehouseKPI.tsx
+│   │   │   │   └── CustomReport/          # 自定义报表
+│   │   │   │       └── ReportBuilder.tsx
+│   │   │   ├── System/                    # 系统管理
+│   │   │   │   ├── User/                  # 用户管理
+│   │   │   │   │   ├── UserList.tsx
+│   │   │   │   │   ├── UserForm.tsx
+│   │   │   │   │   └── UserPermission.tsx
+│   │   │   │   ├── Role/                  # 角色管理
+│   │   │   │   │   ├── RoleList.tsx
+│   │   │   │   │   └── RoleForm.tsx
+│   │   │   │   ├── Menu/                  # 菜单管理
+│   │   │   │   │   └── MenuTree.tsx
+│   │   │   │   └── Log/                   # 日志管理
+│   │   │   │       ├── OperationLog.tsx
+│   │   │   │       └── LoginLog.tsx
+│   │   │   └── Settings/                  # 系统设置
+│   │   │       ├── WarehouseSettings.tsx
+│   │   │       ├── PrintSettings.tsx
+│   │   │       └── NotificationSettings.tsx
+│   │   ├── components/                    # 公共组件
+│   │   │   ├── Layout/
+│   │   │   │   ├── MainLayout.tsx
+│   │   │   │   ├── Sidebar.tsx
+│   │   │   │   ├── Header.tsx
+│   │   │   │   └── Footer.tsx
+│   │   │   ├── UI/
+│   │   │   │   ├── DataTable.tsx
+│   │   │   │   ├── SearchForm.tsx
+│   │   │   │   ├── Modal.tsx
+│   │   │   │   ├── ConfirmDialog.tsx
+│   │   │   │   ├── Loading.tsx
+│   │   │   │   └── ErrorBoundary.tsx
+│   │   │   ├── Form/
+│   │   │   │   ├── FormBuilder.tsx
+│   │   │   │   ├── FormField.tsx
+│   │   │   │   └── FormValidation.tsx
+│   │   │   ├── Charts/
+│   │   │   │   ├── LineChart.tsx
+│   │   │   │   ├── BarChart.tsx
+│   │   │   │   ├── PieChart.tsx
+│   │   │   │   └── DashboardWidget.tsx
+│   │   │   └── Print/
+│   │   │       ├── PrintTemplate.tsx
+│   │   │       └── Barcode.tsx
+│   │   ├── services/                      # API 服务
+│   │   │   ├── api/
+│   │   │   │   ├── inventoryApi.ts
+│   │   │   │   ├── orderApi.ts
+│   │   │   │   ├── purchaseApi.ts
+│   │   │   │   └── reportApi.ts
+│   │   │   ├── auth.ts
+│   │   │   └── websocket.ts
+│   │   ├── stores/                        # 状态管理
+│   │   │   ├── userStore.ts
+│   │   │   ├── menuStore.ts
+│   │   │   ├── notificationStore.ts
+│   │   │   └── themeStore.ts
+│   │   ├── hooks/                         # 自定义 Hooks
+│   │   │   ├── useAuth.ts
+│   │   │   ├── useTable.ts
+│   │   │   ├── useWebSocket.ts
+│   │   │   └── usePermission.ts
+│   │   ├── utils/                         # 工具函数
+│   │   │   ├── request.ts
+│   │   │   ├── format.ts
+│   │   │   ├── validator.ts
+│   │   │   ├── export.ts
+│   │   │   └── barcode.ts
+│   │   ├── assets/                        # 静态资源
+│   │   │   ├── images/
+│   │   │   ├── styles/
+│   │   │   └── icons/
+│   │   ├── router/                        # 路由配置
+│   │   │   ├── index.tsx
+│   │   │   └── routes.ts
+│   │   └── App.tsx
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── tsconfig.json
+│
+└── WMS.AdminWeb.Api/                      # 管理后台专用 API
+    ├── Controllers/
+    │   ├── Admin/
+    │   │   ├── DashboardController.cs
+    │   │   ├── UserController.cs
+    │   │   ├── RoleController.cs
+    │   │   └── MenuController.cs
+    │   └── ...
+    └── Program.cs
+06-Desktop（桌面应用 - WPF/WinForms）
+text
+06-Desktop/
+├── WMS.Desktop.Receiving/                 # 收货工作站
+│   ├── Views/
+│   │   ├── MainWindow.xaml
+│   │   ├── ReceivingView.xaml
+│   │   ├── ScanBarcodeView.xaml
+│   │   └── QualityCheckView.xaml
+│   ├── ViewModels/
+│   │   ├── ReceivingViewModel.cs
+│   │   ├── ScanViewModel.cs
+│   │   └── QualityCheckViewModel.cs
+│   ├── Services/
+│   │   ├── BarcodeService.cs
+│   │   ├── PrinterService.cs
+│   │   └── LabelService.cs
+│   └── App.xaml
+│
+├── WMS.Desktop.Picking/                   # 拣货工作站
+│   ├── Views/
+│   │   ├── PickingView.xaml
+│   │   ├── WavePickingView.xaml
+│   │   └── BatchPickingView.xaml
+│   ├── ViewModels/
+│   │   ├── PickingViewModel.cs
+│   │   ├── WavePickingViewModel.cs
+│   │   └── PickingTaskViewModel.cs
+│   └── Services/
+│       ├── VoicePickingService.cs         # 语音拣货
+│       └── LightPickingService.cs         # 灯光拣货
+│
+├── WMS.Desktop.Packing/                   # 打包工作站
+│   ├── Views/
+│   │   ├── PackingView.xaml
+│   │   ├── PackageLabelView.xaml
+│   │   └── WeightCheckView.xaml
+│   ├── ViewModels/
+│   │   ├── PackingViewModel.cs
+│   │   └── WeightCheckViewModel.cs
+│   └── Services/
+│       └── ScaleService.cs                # 电子秤集成
+│
+├── WMS.Desktop.Shipping/                  # 发货工作站
+│   ├── Views/
+│   │   ├── ShippingView.xaml
+│   │   ├── LoadTruckView.xaml
+│   │   └── ManifestView.xaml
+│   └── ViewModels/
+│       ├── ShippingViewModel.cs
+│       └── LoadTruckViewModel.cs
+│
+└── WMS.Desktop.Inventory/                 # 库存盘点工作站
+    ├── Views/
+    │   ├── CycleCountView.xaml
+    │   ├── InventoryAdjustView.xaml
+    │   └── LocationTransferView.xaml
+    ├── ViewModels/
+    │   ├── CycleCountViewModel.cs
+    │   └── InventoryAdjustViewModel.cs
+    └── Services/
+        └── RFIDService.cs                 # RFID 集成
+07-Mobile（移动应用 - PDA/手持终端）
+text
+07-Mobile/
+├── WMS.Mobile.PDA/                        # PDA 应用（Android/iOS）
+│   ├── src/
+│   │   ├── screens/
+│   │   │   ├── LoginScreen.tsx
+│   │   │   ├── DashboardScreen.tsx
+│   │   │   ├── Receiving/
+│   │   │   │   ├── ReceivingScreen.tsx
+│   │   │   │   ├── ReceivingListScreen.tsx
+│   │   │   │   └── ReceivingDetailScreen.tsx
+│   │   │   ├── Picking/
+│   │   │   │   ├── PickingScreen.tsx
+│   │   │   │   ├── PickingTaskScreen.tsx
+│   │   │   │   └── ScanScreen.tsx
+│   │   │   ├── Inventory/
+│   │   │   │   ├── InventorySearchScreen.tsx
+│   │   │   │   ├── StockCheckScreen.tsx
+│   │   │   │   └── StockTransferScreen.tsx
+│   │   │   ├── Warehouse/
+│   │   │   │   ├── LocationMapScreen.tsx
+│   │   │   │   └── LocationNavScreen.tsx   # 库位导航
+│   │   │   └── Settings/
+│   │   │       └── SettingsScreen.tsx
+│   │   ├── components/
+│   │   │   ├── Scanner/
+│   │   │   │   ├── BarcodeScanner.tsx
+│   │   │   │   └── QRScanner.tsx
+│   │   │   ├── UI/
+│   │   │   │   ├── Button.tsx
+│   │   │   │   ├── Input.tsx
+│   │   │   │   └── ListItem.tsx
+│   │   │   └── Navigation/
+│   │   │       └── BottomTab.tsx
+│   │   ├── services/
+│   │   │   ├── api/
+│   │   │   │   ├── inventoryApi.ts
+│   │   │   │   ├── orderApi.ts
+│   │   │   │   └── taskApi.ts
+│   │   │   ├── scannerService.ts
+│   │   │   ├── printerService.ts
+│   │   │   └── offlineSyncService.ts      # 离线同步
+│   │   ├── hooks/
+│   │   │   ├── useScanner.ts
+│   │   │   ├── useOfflineData.ts
+│   │   │   └── useVoiceInput.ts           # 语音输入
+│   │   └── App.tsx
+│   ├── package.json
+│   └── app.json
+│
+└── WMS.Mobile.Supervisor/                 # 主管移动端（手机）
+    ├── src/
+    │   ├── screens/
+    │   │   ├── Dashboard/
+    │   │   │   ├── DashboardScreen.tsx
+    │   │   │   ├── KPIScreen.tsx
+    │   │   │   └── AlertScreen.tsx
+    │   │   ├── Monitor/
+    │   │   │   ├── WarehouseMonitorScreen.tsx
+    │   │   │   ├── TaskMonitorScreen.tsx
+    │   │   │   └── EquipmentMonitorScreen.tsx
+    │   │   ├── Reports/
+    │   │   │   ├── ReportScreen.tsx
+    │   │   │   └── ReportDetailScreen.tsx
+    │   │   └── Approval/
+    │   │       ├── ApprovalListScreen.tsx
+    │   │       └── ApprovalDetailScreen.tsx
+    │   └── App.tsx
+    └── package.json
+08-Reports（报表系统）
+text
+08-Reports/
+├── WMS.Reports.Server/                    # 报表服务器
+│   ├── Controllers/
+│   │   ├── ReportController.cs
+│   │   ├── ExportController.cs
+│   │   └── PrintController.cs
+│   ├── Services/
+│   │   ├── ReportGenerator.cs
+│   │   ├── PDFExportService.cs
+│   │   ├── ExcelExportService.cs
+│   │   └── PrintService.cs
+│   ├── Templates/                         # 报表模板
+│   │   ├── Inventory/
+│   │   │   ├── InventorySummary.rdlc
+│   │   │   ├── InventoryDetail.rdlc
+│   │   │   └── StockAlert.rdlc
+│   │   ├── Orders/
+│   │   │   ├── InboundOrder.rdlc
+│   │   │   ├── OutboundOrder.rdlc
+│   │   │   └── PickingList.rdlc
+│   │   ├── Labels/
+│   │   │   ├── ProductLabel.rdlc
+│   │   │   ├── PalletLabel.rdlc
+│   │   │   └── ShippingLabel.rdlc
+│   │   └── Reports/
+│   │       ├── DailyReport.rdlc
+│   │       ├── MonthlyReport.rdlc
+│   │       └── KPIReport.rdlc
+│   └── Program.cs
+│
+└── WMS.Reports.Client/                    # 报表客户端
+    ├── src/
+    │   ├── ReportViewer.tsx
+    │   ├── ReportDesigner.tsx
+    │   └── PrintPreview.tsx
+    └── package.json
+界面层与后端的关系
+text
+┌─────────────────────────────────────────────────────────────────┐
+│                      用户交互层                                  │
+├─────────────────────────────────────────────────────────────────┤
+│  Web管理后台    │  桌面应用      │  移动PDA     │  报表系统     │
+│  (React/Vue)   │  (WPF)        │  (React Native) │  (RDLC)   │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓ API/WebSocket/SignalR
+┌─────────────────────────────────────────────────────────────────┐
+│                      API 网关层                                  │
+├─────────────────────────────────────────────────────────────────┤
+│  WMS.WebAPI (主网关) + WMS.AdminWeb.Api (管理后台专用)          │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                      业务服务层                                  │
+├─────────────────────────────────────────────────────────────────┤
+│  Inventory │ Order │ Purchase │ Sales │ Report │ System        │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                    数据访问层                                    │
+├─────────────────────────────────────────────────────────────────┤
+│              WMS.Framework.Data + WMS.Framework.Caching         │
+└─────────────────────────────────────────────────────────────────┘
+用户场景与界面对应
+用户角色	主要界面	使用场景
+仓库管理员	Web 管理后台	日常管理、报表查看、系统配置
+收货员	桌面应用/PDA	收货、质检、上架
+拣货员	PDA/语音设备	拣货、波次拣货
+打包员	桌面应用	打包、称重、贴标
+发货员	桌面应用/PDA	装车、发货确认
+盘点员	PDA	循环盘点、库存调整
+主管/经理	Web后台/手机App	监控、审批、查看报表
+系统管理员	Web后台	用户权限、系统配置
+部署架构（含界面层）
+text
+┌─────────────────────────────────────────────────────────────────┐
+│                        用户访问层                                │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐           │
+│  │  浏览器      │ │  桌面客户端  │ │  PDA设备     │           │
+│  │  (Web)       │ │  (WPF)       │ │  (Android)   │           │
+│  └──────────────┘ └──────────────┘ └──────────────┘           │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                      CDN / 静态资源                             │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  React/Vue 静态文件  |  报表模板  |  图片资源            │   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                     负载均衡器 (Nginx/IIS)                       │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                    API 网关 (多个实例)                          │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  WMS.WebAPI  |  WMS.AdminWeb.Api  |  WMS.Reports.Server│   │
+│  └─────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                      业务服务 (多个实例)                         │
+└─────────────────────────────────────────────────────────────────┘
+                              ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                    数据库 / 缓存 / 消息队列                      │
+└─────────────────────────────────────────────────────────────────┘
+技术栈建议
+层	技术选型	说明
+Web 管理后台	React + TypeScript + Ant Design	企业级后台
+桌面应用	.NET 8 + WPF/MAUI	Windows 桌面
+移动 PDA	React Native + TypeScript	跨平台
+报表系统	RDLC + FastReport	专业报表
+API 网关	ASP.NET Core + Ocelot/YARP	统一入口
+实时通信	SignalR + WebSocket	实时推送
+打印服务	Zebra 打印 + 标签设计	物流标签
+这样的界面层设计能满足 WMS 系统的所有用户场景，从管理层到操作层都有合适的界面！

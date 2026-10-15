@@ -1,0 +1,224 @@
+continew-admin
+├─ continew-webapi（API 及打包部署模块）
+│  ├─ src
+│  │  ├─ main
+│  │  │  ├─ java/top/continew/admin
+│  │  │  │  ├─ config （配置）
+│  │  │  │  ├─ controller
+│  │  │  │  │  ├─ auth（系统认证相关 API）
+│  │  │  │  │  ├─ common（通用相关 API）
+│  │  │  │  │  ├─ monitor（系统监控相关 API）
+│  │  │  │  │  ├─ system（系统管理相关 API）
+│  │  │  │  │  └─ tool（系统工具相关 API）
+│  │  │  │  └─ ContiNewAdminApplication.java（ContiNew Admin 启动程序）
+│  │  │  └─ resources
+│  │  │     ├─ config（核心配置目录）
+│  │  │     │  ├─ application-dev.yml（开发环境配置文件）
+│  │  │     │  ├─ application-prod.yml（生产环境配置文件）
+│  │  │     │  └─ application.yml（通用配置文件）
+│  │  │     ├─ db/changelog（Liquibase 数据脚本配置目录）
+│  │  │     │  ├─ mysql（MySQL 数据库初始 SQL 脚本目录）
+│  │  │     │  ├─ postgresql（PostgreSQL 数据库初始 SQL 脚本目录）
+│  │  │     │  └─ db.changelog-master.yaml（Liquibase 变更记录文件）
+│  │  │     ├─ templates（模板配置目录，例如：邮件模板）
+│  │  │     ├─ banner.txt（Banner 配置文件）
+│  │  │     └─ logback-spring.xml（日志配置文件）
+│  │  └─ test（测试相关代码目录）
+│  └─ pom.xml（包含打包相关配置）
+├─ continew-module-system（系统管理模块，存放系统管理相关业务功能，例如：部门管理、角色管理、用户管理等）
+│  ├─ src
+│  │  ├─ main
+│  │  │  ├─ java/top/continew/admin
+│  │  │  │  ├─ auth（系统认证相关业务）
+│  │  │  │  │  ├─ model（系统认证相关模型）
+│  │  │  │  │  │  ├─ query（系统认证相关查询条件）
+│  │  │  │  │  │  ├─ req（系统认证相关请求对象（Request））
+│  │  │  │  │  │  └─ resp（系统认证相关响应对象（Response））
+│  │  │  │  │  └─ service（系统认证相关业务接口及实现类）
+│  │  │  │  └─ system（系统管理相关业务）
+│  │  │  │     ├─ config（系统管理相关配置）
+│  │  │  │     ├─ enums（系统管理相关枚举）
+│  │  │  │     ├─ mapper（系统管理相关 Mapper）
+│  │  │  │     ├─ model（系统管理相关模型）
+│  │  │  │     │  ├─ entity（系统管理相关实体对象）
+│  │  │  │     │  ├─ query（系统管理相关查询条件）
+│  │  │  │     │  ├─ req（系统管理相关请求对象（Request））
+│  │  │  │     │  └─ resp（系统管理相关响应对象（Response））
+│  │  │  │     ├─ service（系统管理相关业务接口及实现类）
+│  │  │  │     └─ util（系统管理相关工具类）
+│  │  │  └─ resources
+│  │  │     └─ mapper（系统管理相关 Mapper XML 文件目录）
+│  │  └─ test（测试相关代码目录）
+│  └─ pom.xml
+├─ continew-plugin（插件模块，存放代码生成、任务调度等扩展模块，后续会进行插件化改造）
+│  ├─ continew-plugin-schedule（任务调度插件模块）
+│  │  ├─ src
+│  │  │  ├─ main/java/top/continew/admin/schedule
+│  │  │  │  ├─ api（任务调度中心相关 API）
+│  │  │  │  ├─ config（任务调度相关配置）
+│  │  │  │  ├─ constant（任务调度相关常量）
+│  │  │  │  ├─ enums（任务调度相关枚举）
+│  │  │  │  ├─ model（任务调度相关模型）
+│  │  │  │  │  ├─ query（任务调度相关查询条件）
+│  │  │  │  │  ├─ req（任务调度相关请求对象（Request））
+│  │  │  │  │  └─ resp（任务调度相关响应对象（Response））
+│  │  │  │  └─ service（代码生成器相关业务接口及实现类）
+│  │  │  └─ test（测试相关代码目录）
+│  │  └─ pom.xml
+│  ├─ continew-plugin-open（能力开放插件模块）
+│  │  ├─ src
+│  │  │  ├─ main/java/top/continew/admin/open
+│  │  │  │  ├─ mapper（代码生成器相关 Mapper）
+│  │  │  │  ├─ model（能力开放相关模型）
+│  │  │  │  │  ├─ entity（能力开放相关实体对象）
+│  │  │  │  │  ├─ query（能力开放相关查询条件）
+│  │  │  │  │  ├─ req（能力开放相关请求对象（Request））
+│  │  │  │  │  └─ resp（能力开放相关响应对象（Response））
+│  │  │  │  └─ service（能力开放相关业务接口及实现类）
+│  │  │  └─ test（测试相关代码目录）
+│  │  └─ pom.xml
+│  ├─ continew-plugin-generator（代码生成器插件模块）
+│  │  ├─ src
+│  │  │  ├─ main
+│  │  │  │  ├─ java/top/continew/admin/generator
+│  │  │  │  │  ├─ config（代码生成器相关配置）
+│  │  │  │  │  ├─ enums（代码生成器相关枚举）
+│  │  │  │  │  ├─ mapper（代码生成器相关 Mapper）
+│  │  │  │  │  ├─ model（代码生成器相关模型）
+│  │  │  │  │  │  ├─ entity（代码生成器相关实体对象）
+│  │  │  │  │  │  ├─ query（代码生成器相关查询条件）
+│  │  │  │  │  │  ├─ req（代码生成器相关请求对象（Request））
+│  │  │  │  │  │  └─ resp（代码生成器相关响应对象（Response））
+│  │  │  │  │  └─ service（代码生成器相关业务接口及实现类）
+│  │  │  │  └─ resources
+│  │  │  │     ├─ templates/generator（代码生成相关模板目录）
+│  │  │  │     ├─ application.yml（代码生成配置文件）
+│  │  │  │     └─ generator.properties（代码生成类型映射配置文件）
+│  │  │  └─ test（测试相关代码目录）
+│  │  └─ pom.xml
+│  └─ pom.xml
+├─ continew-common（公共模块，存放公共工具类，公共配置等）
+│  ├─ src
+│  │  ├─ main/java/top/continew/admin/common
+│  │  │  ├─ config（公共配置）
+│  │  │  ├─ constant（公共常量）
+│  │  │  ├─ enums（公共枚举）
+│  │  │  ├─ model（公共模型）
+│  │  │  │  ├─ dto（公共 DTO（Data Transfer Object））
+│  │  │  │  ├─ req（公共请求对象（Request））
+│  │  │  │  └─ resp（公共响应对象（Response））
+│  │  │  └─ util（公共工具类）
+│  │  └─ test（测试相关代码目录）
+│  └─ pom.xml
+├─ continew-extension（扩展模块）
+│  ├─ continew-extension-schedule-server（任务调度服务端模块，实际开发时如果是公司统一提供环境，可直接删除本模块）
+│  │  ├─ src
+│  │  │  ├─ main
+│  │  │  │  ├─ java/top/continew/admin/extension/schedule
+│  │  │  │  │  └─ ScheduleServerApplication.java（任务调度服务端启动程序）
+│  │  │  │  └─ resources
+│  │  │  │     ├─ config（核心配置目录）
+│  │  │  │     │  ├─ application-dev.yml（开发环境配置文件）
+│  │  │  │     │  ├─ application-prod.yml（生产环境配置文件）
+│  │  │  │     │  └─ application.yml（通用配置文件）
+│  │  │  │     ├─ db/changelog（Liquibase 数据脚本配置目录）
+│  │  │  │     │  ├─ mysql（MySQL 数据库初始 SQL 脚本目录）
+│  │  │  │     │  ├─ postgresql（PostgreSQL 数据库初始 SQL 脚本目录）
+│  │  │  │     │  └─ db.changelog-master.yaml（Liquibase 变更记录文件）
+│  │  │  │     └─ logback-spring.xml（日志配置文件）
+│  │  │  └─ test（测试相关代码目录）
+│  │  └─ pom.xml
+│  └─ pom.xml
+├─ .github（GitHub 相关配置目录，实际开发时直接删除）
+├─ .idea
+│  └─ icon.png（IDEA 项目图标，实际开发时直接删除）
+├─ .image（截图目录，实际开发时直接删除）
+├─ .style（代码格式、License文件头相关配置目录，实际开发时根据需要取舍，删除时注意删除 spotless 插件配置）
+├─ .gitignore（Git 忽略文件相关配置文件）
+├─ docker（项目部署相关配置目录，实际开发时可备份后直接删除）
+├─ LICENSE（开源协议文件）
+├─ CHANGELOG.md（更新日志文件，实际开发时直接删除）
+├─ README.md（项目 README 文件，实际开发时替换为真实内容）
+├─ lombok.config（Lombok 全局配置文件）
+└─ pom.xml（包含版本锁定及全局插件相关配置）
+
+
+
+
+
+continew-admin-ui
+├─ config              # Vite 插件配置
+├─ public              # 公共静态资源（favicon.ico、logo.svg）
+├─ src
+│  ├─ apis             # 请求接口
+│  │  ├─ auth            # 认证模块
+│  │  ├─ code            # 代码生成模块
+│  │  ├─ common          # 公共模块
+│  │  ├─ monitor         # 系统监控模块
+│  │  ├─ open            # 能力开放模块
+│  │  ├─ schedule        # 任务调度模块
+│  │  └─ system          # 系统管理模块
+│  ├─ assets           # 静态资源
+│  │  ├─ icons           # 图标资源
+│  │  ├─ images          # 图片资源
+│  │  └─ fonts           # 字体资源
+│  ├─ components       # 通用业务组件
+│  ├─ config           # 全局配置（包含 echarts 主题）
+│  │  └─ settings.json   # 配置文件
+│  ├─ directives       # 指令集（如需，可自行补充）
+│  ├─ hooks            # 全局 hooks
+│  ├─ layout           # 布局
+│  ├─ mock             # 模拟数据
+│  ├─ router           # 路由配置
+│  ├─ stores           # 状态管理中心
+│  ├─ types            # TypeScript 类型
+│  ├─ utils            # 工具库（mock 全局开启/关闭）
+│  ├─ views            # 页面
+│  │  ├─ code            # 代码生成
+│  │  │  └─ generator      # 代码生成
+│  │  ├─ dashboard       # 仪表盘
+│  │  │  ├─ analysis       # 分析页
+│  │  │  └─ workplace      # 工作台
+│  │  ├─ default         # 默认页面
+│  │  ├─ login           # 登录模块
+│  │  ├─ monitor         # 系统监控
+│  │  │  ├─ log            # 系统日志
+│  │  │  │  ├─ login         # 登录日志
+│  │  │  │  └─ operation     # 操作日志
+│  │  │  └─ online           # 在线用户
+│  │  ├─ open            # 能力开放
+│  │  │ └─ user            # 应用管理
+│  │  ├─ setting         # 设置
+│  │  │  ├─ profile        # 个人中心
+│  │  │  └─ message        # 消息中心
+│  │  └─ system          # 系统管理
+│  │    ├─ config          # 系统配置
+│  │    ├─ dept            # 部门管理
+│  │    ├─ dict            # 字典管理
+│  │    ├─ file            # 文件管理
+│  │    ├─ menu            # 菜单管理
+│  │    ├─ notice          # 通知公告
+│  │    ├─ role            # 角色管理
+│  │    ├─ storage         # 存储管理
+│  │    └─ user            # 用户管理
+│  ├─ App.vue
+│  └─ main.ts
+├─ .env.development    # 开发环境配置
+├─ .env.production     # 生产环境配置
+├─ .env.test           # 测试环境配置
+├─ eslint.config.js    # ESLint 配置
+├─ index.html
+├─ package.json
+├─ package-lock.json
+├─ pnpm-lock.yaml
+├─ tsconfig.json
+├─ vite.config.ts
+├─ .gitignore（Git 忽略文件相关配置文件）
+├─ .github（GitHub 相关配置目录，实际开发时直接删除）
+├─ .idea
+│  └─ icon.png（IDEA 项目图标，实际开发时直接删除）
+├─ .image（截图目录，实际开发时直接删除）
+├─ .vscode（VSCode 配置目录）
+├─ LICENSE（开源协议文件）
+├─ CHANGELOG.md（更新日志文件，实际开发时直接删除）
+└─ README.md（项目 README 文件，实际开发时替换为真实内容）
