@@ -1,0 +1,301 @@
+## Window 与 UserControl 的选择指南
+
+---
+
+## 🎯 核心区分原则
+
+| 维度 | Window | UserControl |
+|------|--------|-------------|
+| **本质** | 独立的顶级容器 | 可复用的UI组件 |
+| **生命周期** | 可独立打开/关闭 | 随父容器加载/卸载 |
+| **窗口装饰** | 有标题栏、边框 | 无 |
+| **大小控制** | 可独立调整大小 | 由父容器决定 |
+| **拖拽移动** | 可拖动 | 需要父窗口支持 |
+| **模态行为** | 支持 ShowDialog() | 不支持 |
+| **关闭事件** | 有 Closing/Closed | 无 |
+| **复用性** | 低（通常作为主入口） | 高（可在多处使用） |
+
+---
+
+## 📱 何时使用 Window
+
+### 1. 应用主窗口（MainWindow）
+```csharp
+// ✅ 使用 Window
+public class MainWindow : Window { }
+
+// ❌ 不要用 UserControl
+public class MainWindow : UserControl { }
+```
+
+### 2. 模态对话框
+```csharp
+// ✅ 使用 Window（作为对话框）
+var dialog = new SettingsDialog();
+await dialog.ShowDialog(this);
+
+// ❌ UserControl 无法作为独立对话框
+```
+
+### 3. 独立弹窗/工具窗口
+```csharp
+// ✅ 使用 Window - 可独立拖拽、最小化
+var toolWindow = new CalculatorWindow();
+toolWindow.Show();
+
+// 使用场景：计算器、画图工具、属性面板等
+```
+
+### 4. 需要自定义窗口装饰的场景
+```csharp
+// ✅ 使用 Window - 可以自定义标题栏、边框
+<Window WindowDecorations="BorderOnly"
+        ExtendClientAreaToDecorationsHint="True">
+    <!-- 自定义标题栏 -->
+</Window>
+```
+
+---
+
+## 📦 何时使用 UserControl
+
+### 1. 可复用的UI组件
+```xml
+<!-- ✅ 使用 UserControl - 可在多个页面复用 -->
+<UserControl x:Class="MyApp.Controls.UserAvatar">
+    <StackPanel>
+        <Image Source="{Binding AvatarUrl}" />
+        <TextBlock Text="{Binding UserName}" />
+    </StackPanel>
+</UserControl>
+
+<!-- 使用 -->
+<local:UserAvatar DataContext="{Binding CurrentUser}" />
+```
+
+### 2. 页面内容（配合导航框架）
+```csharp
+// ✅ 使用 UserControl - 作为导航页面
+public class HomePage : UserControl { }
+public class SettingsPage : UserControl { }
+public class AboutPage : UserControl { }
+
+// 在主窗口中切换
+<ContentControl Content="{Binding CurrentPage}" />
+```
+
+### 3. 复杂控件封装
+```xml
+<!-- ✅ 使用 UserControl - 封装复杂逻辑 -->
+<UserControl x:Class="MyApp.Controls.DateTimePicker">
+    <Grid>
+        <DatePicker SelectedDate="{Binding Date}" />
+        <TimePicker SelectedTime="{Binding Time}" />
+    </Grid>
+</UserControl>
+```
+
+### 4. 列表项模板
+```csharp
+// ✅ 使用 UserControl - 作为列表项
+public class ProductItemView : UserControl { }
+
+// 在 ListBox 中使用
+<ListBox ItemTemplate="{StaticResource ProductItemTemplate}" />
+```
+
+### 5. 对话框内容（非窗口）
+```xml
+<!-- ✅ 使用 UserControl - 嵌入到 Window 中 -->
+<Window x:Class="MyApp.Views.DialogWindow">
+    <Grid>
+        <!-- 内容可以抽取为 UserControl 复用 -->
+        <local:DialogContent DataContext="{Binding}" />
+    </Grid>
+</Window>
+```
+
+---
+
+## 📊 决策流程图
+
+```mermaid
+flowchart TD
+    Start[需要创建 View] --> Q1{是否需要独立打开/关闭？}
+    
+    Q1 -->|是| Window
+    Q1 -->|否| Q2{是否作为应用主入口？}
+    
+    Q2 -->|是| Window
+    Q2 -->|否| Q3{是否需要标题栏/边框？}
+    
+    Q3 -->|是| Q4{是否是模态对话框？}
+    Q4 -->|是| Window
+    Q4 -->|否| Q5{是否可以独立拖拽？}
+    Q5 -->|是| Window
+    Q5 -->|否| UserControl
+    
+    Q3 -->|否| UserControl
+    
+    Window --> R1[使用 Window]
+    UserControl --> R2[使用 UserControl]
+```
+
+---
+
+## 🔧 实际应用示例
+
+### 你的项目中的选择
+
+```csharp
+// 项目结构
+Fountian.AuxiHub/
+├── Views/
+│   ├── MainWindow.cs              // ✅ Window - 应用主窗口
+│   ├── AboutView.cs               // ✅ UserControl - 关于页面
+│   ├── VideoSettingsView.cs       // ✅ UserControl - 视频设置页面
+│   ├── LoginDialog.cs             // ✅ Window - 登录对话框
+│   └── SettingsWindow.cs          // ✅ Window - 独立设置窗口
+```
+
+### 正确示例
+
+```csharp
+// ✅ MainWindow - 使用 Window
+public partial class MainWindow : Window
+{
+    public MainWindow()
+    {
+        InitializeComponent();
+    }
+}
+
+// ✅ AboutView - 使用 UserControl（作为导航页面）
+public partial class AboutView : UserControl
+{
+    public AboutView()
+    {
+        InitializeComponent();
+    }
+}
+
+// ✅ LoginDialog - 使用 Window（模态对话框）
+public partial class LoginDialog : Window
+{
+    public LoginDialog()
+    {
+        InitializeComponent();
+    }
+}
+
+// ✅ 在 MainWindow 中切换 UserControl
+<ContentControl Content="{Binding CurrentPage}" />
+```
+
+### 错误示例
+
+```csharp
+// ❌ 错误：主窗口不应该用 UserControl
+public partial class MainWindow : UserControl { }
+
+// ❌ 错误：独立对话框不应该用 UserControl
+public partial class LoginDialog : UserControl { }
+
+// ❌ 错误：可复用组件不应该用 Window
+public partial class UserAvatar : Window { }
+```
+
+---
+
+## 📋 选择对照表
+
+| 使用场景 | 推荐类型 | 原因 |
+|---------|---------|------|
+| 主窗口 | **Window** | 需要窗口装饰、独立生命周期 |
+| 模态对话框 | **Window** | 需要 ShowDialog() 阻塞行为 |
+| 非模态工具窗 | **Window** | 可独立拖拽、最小化 |
+| 设置窗口 | **Window** | 可独立打开/关闭 |
+| 登录窗口 | **Window** | 模态对话框 |
+| 导航页面 | **UserControl** | 嵌入主窗口内容区 |
+| 列表项模板 | **UserControl** | 可复用组件 |
+| 自定义控件 | **UserControl** | 封装UI逻辑 |
+| 弹窗内容 | **UserControl** | 嵌入 Window 复用 |
+| 侧边栏组件 | **UserControl** | 嵌入主布局 |
+| 标签页内容 | **UserControl** | 随 TabControl 切换 |
+
+---
+
+## 🚀 高级场景：混合使用
+
+### 场景1：UserControl 作为 Window 内容
+```xml
+<!-- 对话框 Window -->
+<Window x:Class="MyApp.Views.DialogWindow">
+    <Grid>
+        <!-- 内容抽取为 UserControl，可复用 -->
+        <local:DialogContent />
+    </Grid>
+</Window>
+```
+
+### 场景2：Window 作为 UserControl 的宿主
+```csharp
+// 从 UserControl 中打开新 Window
+public partial class SettingsPage : UserControl
+{
+    private void OpenDetailWindow()
+    {
+        var window = new DetailWindow();
+        window.ShowDialog(this.VisualRoot as Window);
+    }
+}
+```
+
+### 场景3：可复用的对话框内容
+```csharp
+// UserControl：对话框内容
+public class MessageDialogContent : UserControl { }
+
+// Window：对话框宿主
+public class MessageDialog : Window
+{
+    public MessageDialog(string title, string message)
+    {
+        Content = new MessageDialogContent
+        {
+            DataContext = new { Title = title, Message = message }
+        };
+    }
+}
+```
+
+---
+
+## ✅ 快速决策口诀
+
+```
+需要独立开闭用 Window
+需要模态阻塞用 Window
+需要窗口装饰用 Window
+
+嵌入页面用 UserControl
+可复用组件用 UserControl
+列表模板用 UserControl
+
+主入口必定是 Window
+导航页面是 UserControl
+```
+
+---
+
+## 📝 你的项目建议
+
+根据你的代码结构：
+
+| 现有 View | 当前类型 | 是否正确 | 建议 |
+|-----------|---------|---------|------|
+| MainWindow | Window | ✅ 正确 | 保持 |
+| AboutView | UserControl | ✅ 正确 | 保持 |
+| VideoSettingsView | UserControl | ✅ 正确 | 保持 |
+
+**结论**：你的选择是正确的，MainWindow 作为主窗口，各个功能页面使用 UserControl 在导航中切换。
